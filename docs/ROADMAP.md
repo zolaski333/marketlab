@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 250 tests passing, `mypy --strict` clean on 44 source files.
+Last verified: 279 tests passing, `mypy --strict` clean on 47 source files.
 
 ---
 
@@ -70,12 +70,12 @@ Last verified: 250 tests passing, `mypy --strict` clean on 44 source files.
   Migrations become necessary only once a study is live and the schema changes;
   `Database.migration_mode()` is the audited window they will run in.
 - **The decision-path isolation lint protects `agents/`, `retrieval/`,
-  `forecasting/`.** As of task 7, `retrieval/` is populated and the guard
-  does real work for it (`tests/security/test_decision_path_isolation.py`
-  now scans real files, not an empty directory). `agents/` and `forecasting/`
-  are still empty, so the test passes vacuously for those two until tasks
-  8/9/12 put code in them — that is the point of writing the guard before
-  the code it guards exists, not after.
+  `forecasting/`.** As of task 8, `retrieval/` and `agents/` are both
+  populated and the guard does real work for them
+  (`tests/security/test_decision_path_isolation.py` scans real files, not
+  empty directories). `forecasting/` is still empty, so the test passes
+  vacuously for it until task 12 puts code there — that is the point of
+  writing the guard before the code it guards exists, not after.
 
 ---
 
@@ -93,8 +93,10 @@ Last verified: 250 tests passing, `mypy --strict` clean on 44 source files.
 | Frozen retrieval index and search (§10.2) | `done` | `tests/unit/test_retrieval_types.py` |
 | Typed agent tools with budget enforcement (§10.3, §10.6) | `done` | `tests/unit/test_retrieval_tools.py`, `tests/unit/test_retrieval_budget.py` |
 | Snapshot + index + tools wired end to end over the full synthetic run | `done` | `tests/integration/test_snapshot_and_retrieval_wiring.py` |
-| Provider-independent model interface (§12.1) | `not started` | — |
-| Deterministic policy fake with **no access to `condition_id`** | `not started` | — |
+| Provider-independent model interface (§12.1) | `done` | `tests/unit/test_deterministic_policy.py` |
+| Deterministic policy fake with **no access to `condition_id`** | `done` | `tests/unit/test_deterministic_policy.py`, structural guard in `tests/security/test_condition_isolation.py` |
+| Decision orchestration loop — tool-calling, citation validation, failure taxonomy (§10, §14.5) | `done` | `tests/unit/test_decision_agent.py` |
+| Prompt-injection containment (§11.2) | `done` | `tests/security/test_prompt_injection_containment.py` |
 | Arms A / B / C / D **and placebos B′ / C′** | `not started` | — |
 | Virtual execution at the next eligible window (§16.2) | `not started` | — |
 | Double-entry ledger, settlement, corporate actions (§17) | `not started` | — |
@@ -143,6 +145,35 @@ Last verified: 250 tests passing, `mypy --strict` clean on 44 source files.
   count.** A real per-model tokenizer would make the budget provider-specific,
   which §12.1 forbids at this layer; character count is a deliberately crude,
   provider-independent stand-in until task #4's cost model exists.
+- **No real `LanguageModel` provider adapter exists.** Task 8 only had to
+  build the interface and a deterministic fake; a real Phase 3 adapter
+  (OpenAI, Anthropic, ...) implements the same `LanguageModel` Protocol
+  without touching any of its callers.
+- **`DecisionOutcome` carries no `bundle_id`.** `marketlab.agents.decision`
+  structurally cannot know the run id, arm id, or repetition number —
+  knowing them would itself be the condition leak this layer exists to
+  prevent — so it does not mint the final decision-bundle identity. The
+  caller (task 9's runner), which holds those routing keys, derives
+  `IdKind.DECISION_BUNDLE` from this outcome's content plus them when it
+  persists the result. See the `marketlab.agents.decision` docstring.
+- **`RawDecision` covers forecasts and trade intents only.** `IdKind.CLAIM`
+  and `IdKind.CONSIDERATION` remain types without call sites (like
+  `FailureScope`/`ObservedAgentFailure` were in Phase 0) — a fuller
+  claim/reasoning taxonomy is deferred until a task actually needs one
+  rather than guessed at now.
+- **`TradeIntent` carries no size or weight.** Sizing against real capital
+  and risk limits is the execution engine's contract (task 10); inventing a
+  numeric shape for it now would likely need reworking once that contract is
+  actually designed.
+- **`IdKind.SENTINEL_RESULT` remains a type without a call site.**
+  Prompt-injection containment (§11.2) is verified by a direct test
+  (`tests/security/test_prompt_injection_containment.py`) rather than a
+  persisted sentinel-run mechanism. Revisit if a later task wants injection
+  results recorded as part of the scientific record, not just tested.
+- **Mid-turn budget exhaustion stops the whole decision, not just that
+  turn.** `DecisionAgent` does not let the model finalise with whatever
+  partial evidence it gathered before hitting the cap — simpler, but worth
+  revisiting once real provider cost/latency tradeoffs are known (task #4).
 
 ---
 
@@ -159,6 +190,7 @@ Each is deliberate; none is silent.
 | §8.1 | One adapter per provider protocol | One `SyntheticMarketDataProvider` implementing all five protocols | Honest for a *synthetic* world: a fabricated script can coherently derive news, prices and corporate actions from one source of truth. Real Phase 3 adapters will not share this shape — each gets its own adapter for its own source. See the `marketlab.ingestion.synthetic` docstring. |
 | §7.1 | `InstrumentVersion` carries an explicit validity period | No stored `effective_to` column | Storing one would mean mutating the previous version's row the moment a new one is written — exactly the in-place edit append-only storage forbids. "Current as of a cutoff" is instead computed as the latest version whose `effective_from` does not exceed it. See the `marketlab.instruments.repository` docstring. |
 | §8.1 | Five raw record kinds, each with its own shape | One uniform `Evidence` type (`kind` + `subject_ids` + `fields`) in the retrieval layer | The raw ingestion types (`RawPriceBar`, `RawNewsItem`, ...) stay precisely typed; only the frozen, agent-facing view collapses them into one searchable, citable shape, the same way a real search index does not keep five parallel collections. See the `marketlab.retrieval.types` docstring. |
+| §12.1 | A provider's own tool-calling wire format | A custom, provider-independent request/response loop (`ModelRequest`/`ModelResponse`/`ToolCallRequest`/`ToolCallResult`) | Mirroring one real provider's exact shape would make that provider's quirks look like part of the platform's core contract. `marketlab.agents.decision.DecisionAgent` drives this loop generically; a real Phase 3 adapter translates to and from its provider's own format at the edge. See the `marketlab.models.types` docstring. |
 
 ## Open questions for the study owner
 
