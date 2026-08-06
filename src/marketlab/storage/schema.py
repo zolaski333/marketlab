@@ -1,0 +1,40 @@
+"""Central registration of every persisted table.
+
+SQLAlchemy's declarative base only knows about a table once the module defining
+it has been imported. A table defined in a module nobody imported is absent from
+``Base.metadata``, so ``create_all`` skips it and any protection keyed to its
+name silently does nothing.
+
+Importing every model module here — and importing *this* module before touching
+the schema — makes that failure impossible: the metadata is complete by
+construction, and :meth:`Database.create_schema` verifies that every table
+listed in ``APPEND_ONLY_TABLES`` is actually present.
+
+Tables are grouped by the pipeline stage that owns them, mirroring §27.
+"""
+
+from __future__ import annotations
+
+from marketlab.audit.roots import DailyRootRow
+from marketlab.instruments.repository import InstrumentRow, InstrumentVersionRow
+from marketlab.snapshots.builder import SnapshotMemberRow, SnapshotRow
+from marketlab.storage.base import Base
+from marketlab.storage.blobs import BlobMetadataRow
+from marketlab.storage.events import EventRow
+
+__all__ = [
+    "Base",
+    "BlobMetadataRow",
+    "DailyRootRow",
+    "EventRow",
+    "InstrumentRow",
+    "InstrumentVersionRow",
+    "SnapshotMemberRow",
+    "SnapshotRow",
+    "table_names",
+]
+
+
+def table_names() -> list[str]:
+    """Return every registered table name, sorted."""
+    return sorted(Base.metadata.tables)
