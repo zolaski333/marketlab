@@ -181,8 +181,15 @@ class DecisionAgent:
         condition: ConditionContext,
         *,
         as_of: Instant,
+        required_forecasts: tuple[tuple[str, int], ...] = (),
     ) -> DecisionOutcome:
-        """Run the loop to completion (a decision, a refusal, or exhaustion)."""
+        """Run the loop to completion (a decision, a refusal, or exhaustion).
+
+        ``required_forecasts`` names ``(instrument_id, horizon_sessions)``
+        pairs the model must cover — empty for a free decision, populated by
+        :class:`marketlab.agents.panel.PanelAgent` for an imposed panel (§15).
+        It carries no condition identity, so it is safe on the model path.
+        """
         tool_results: list[ToolCallResult] = []
         failures: list[ObservedAgentFailure] = []
         decision: RawDecision | None = None
@@ -196,6 +203,7 @@ class DecisionAgent:
                     injected_context=condition.injected_context,
                     tool_catalogue=self._tool_catalogue,
                     tool_results=tuple(tool_results),
+                    required_forecasts=required_forecasts,
                 )
             )
 

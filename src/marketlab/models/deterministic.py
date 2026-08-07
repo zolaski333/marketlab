@@ -133,7 +133,53 @@ class DeterministicPolicyModel:
         }
         news_items = by_tool["search_news"][0].result or []
 
+        if request.required_forecasts:
+            return ModelResponse(
+                decision=self._answer_panel(
+                    request.required_forecasts, price_by_instrument, news_items
+                )
+            )
         return ModelResponse(decision=self._decide(instrument_ids, price_by_instrument, news_items))
+
+    def _answer_panel(
+        self,
+        required: Sequence[tuple[str, int]],
+        price_by_instrument: Mapping[str, Mapping[str, Any]],
+        news_items: Sequence[Mapping[str, Any]],
+    ) -> RawDecision:
+        """Answer exactly the questions asked, and propose no trades.
+
+        A panel is an elicitation, not a decision: producing trade intents here
+        would let the imposed measurement move the portfolio, which is the
+        contamination §15's isolation exists to prevent.
+        """
+        forecasts = [
+            RawForecast(
+                instrument_id=instrument_id,
+                horizon_sessions=horizon,
+                probability_up=_squash(
+                    _signal_from_close(
+                        Decimal(str(price_by_instrument[instrument_id]["fields"]["close"]))
+                    )
+                ),
+                cited_evidence_ids=self._citations(instrument_id, price_by_instrument, news_items),
+            )
+            for instrument_id, horizon in required
+            if instrument_id in price_by_instrument
+        ]
+        return RawDecision(forecasts=tuple(forecasts), trade_intents=(), narrative="")
+
+    def _citations(
+        self,
+        instrument_id: str,
+        price_by_instrument: Mapping[str, Mapping[str, Any]],
+        news_items: Sequence[Mapping[str, Any]],
+    ) -> tuple[str, ...]:
+        quote = price_by_instrument[instrument_id]
+        cited = [str(quote["evidence_id"])]
+        related = [item for item in news_items if instrument_id in item.get("subject_ids", ())]
+        cited.extend(str(item["evidence_id"]) for item in related[:1])
+        return tuple(cited)
 
     def _decide(
         self,

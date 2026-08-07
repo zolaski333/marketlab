@@ -143,6 +143,15 @@ class ModelRequest:
     injected_context: str | None
     tool_catalogue: tuple[ToolSchema, ...]
     tool_results: tuple[ToolCallResult, ...] = ()
+    required_forecasts: tuple[tuple[str, int], ...] = ()
+    """``(instrument_id, horizon_sessions)`` pairs the response must cover.
+
+    Empty for a free decision; populated for an imposed panel (§15), where
+    every condition is asked the *same* questions so their answers are
+    comparable. Deliberately a plain pair rather than a
+    :class:`~marketlab.forecasting.panel.PanelItem`: this module must stay
+    free of any dependency on the packages above it, and a model needs the
+    question, not the bookkeeping around it."""
 
 
 @dataclass(frozen=True, slots=True)
