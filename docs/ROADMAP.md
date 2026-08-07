@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 359 tests passing, `mypy --strict` clean on 51 source files.
+Last verified: 478 tests passing, `mypy --strict` clean on 59 source files.
 
 ---
 
@@ -101,8 +101,14 @@ Last verified: 359 tests passing, `mypy --strict` clean on 51 source files.
 | Randomised / counterbalanced execution order (§13.4, §30.3) | `done` | `tests/unit/test_ordering.py` |
 | Multi-arm cycle runner — shared frozen snapshot, isolated repetitions, sealed decision bundles | `done` | `tests/unit/test_cycle_runner.py`, `tests/integration/test_multi_arm_wiring.py` |
 | Condition isolation verified on **content**, not only on field names | `done` | `tests/security/test_condition_isolation.py` |
-| Virtual execution at the next eligible window (§16.2) | `not started` | — |
-| Double-entry ledger, settlement, corporate actions (§17) | `not started` | — |
+| Virtual execution at the next eligible window (§16.2) | `done` | `tests/unit/test_execution_engine.py` |
+| Sizing, fees, spread and liquidity caps (§16.3–§16.5) | `done` | `tests/unit/test_execution_policy.py` |
+| Double-entry ledger with enforced balance (§17.1, §17.2) | `done` | `tests/unit/test_ledger.py` |
+| Append-only position lots and FIFO cost basis (§17.4) | `done` | `tests/unit/test_positions.py` |
+| Multi-currency valuation with explicit logged rates (§17.3) | `partial` | `tests/unit/test_execution_engine.py`; no FX *conversion*, see gaps |
+| Settlement at T+N on the instrument's own calendar | `done` | `tests/unit/test_execution_engine.py` |
+| Corporate actions applied to books and reference data (§17.5) | `done` | `tests/unit/test_corporate_actions.py` |
+| Whole cycle wired end to end over the synthetic world | `done` | `tests/integration/test_execution_wiring.py` |
 | Memory, reflection, imposed panel (§18, §19, §15) | `not started` | — |
 | Forecast resolution and the statistical plan (§20, §21) | `not started` | — |
 | Real replay that recomputes and compares (§12.5, §30.4) | `not started` | — |
@@ -153,6 +159,46 @@ Last verified: 359 tests passing, `mypy --strict` clean on 51 source files.
   build the interface and a deterministic fake; a real Phase 3 adapter
   (OpenAI, Anthropic, ...) implements the same `LanguageModel` Protocol
   without touching any of its callers.
+- **A portfolio must be funded in each currency it trades; there is no FX
+  conversion.** Buying the EUR-quoted instrument requires EUR cash, and a
+  short EUR balance is an ordinary rejection rather than an automatic
+  conversion from USD. Valuation *does* cross currencies, using the rate
+  carried in the frozen snapshot, so equity is one number. Auto-conversion
+  would need an FX translation account and an FX gain/loss decomposition;
+  building it before anything needs it would be an unused abstraction, and
+  funding per currency is honest in the meantime.
+- **Short selling is not modelled.** A SELL with nothing held is rejected as
+  `NOTHING_TO_SELL`, and `PositionBook.close_quantity` refuses an over-close
+  rather than opening a negative position. This bounds what the study can
+  observe: an arm that is confidently bearish on something it does not hold
+  can express that only by not buying.
+- **No leverage, no margin, no interest.** `target_weight` is capped at 1 and
+  cash never goes negative. Uninvested cash earns nothing, which understates
+  every arm's return equally.
+- **A dividend's cash arrives on the ex-date, not the pay date.** Entitlement
+  — who holds the position, and how much they are owed — is exact. The few
+  sessions of float between ex and pay are collapsed, which matters only for
+  interest this study does not model.
+- **Fills use the execution session's bar, because the synthetic world prints
+  one bar per session.** `execute_after` therefore selects *which* session
+  fills an order, not which intraday price. A real Phase 3 feed with opening
+  prints would make this exact without changing the interface.
+- **Fee magnitudes are placeholders.** 5bp/1.00 minimum for equities and so
+  on are in the spirit of retail brokerage, not a calibrated cost model.
+  They are pre-registered in the sense that every arm pays the same, which is
+  what the comparison needs; they are not claimed to be realistic.
+- **Sizing is a fixed fraction of equity, identical for every arm.** This is
+  deliberate (see `marketlab.execution.policy`) but it bounds the claim: the
+  study measures direction and timing quality, **not portfolio construction**.
+  An arm cannot win by sizing, and cannot demonstrate skill at sizing either.
+- **The cycle's step order is the caller's responsibility, not the
+  platform's.** `tests/integration/test_execution_wiring.py` drives it —
+  reference data, then settlement, corporate actions, fills, decisions — and
+  `marketlab.accounting.positions._SEQUENCE_RANK` records the same order for
+  the fold. Nothing yet *enforces* that a driver calls them in that order; the
+  CLI (task 13) is where that sequence should become a single supported entry
+  point rather than a convention two places agree on.
+
 - **Every arm currently receives nothing.** This is the largest gap in what
   task 9 marks `done`, and it is a gap in *content*, not in machinery. The
   conditions are declared, ordered, isolated, identified and sealed, but the
@@ -231,6 +277,8 @@ Each is deliberate; none is silent.
 | §8.1 | Five raw record kinds, each with its own shape | One uniform `Evidence` type (`kind` + `subject_ids` + `fields`) in the retrieval layer | The raw ingestion types (`RawPriceBar`, `RawNewsItem`, ...) stay precisely typed; only the frozen, agent-facing view collapses them into one searchable, citable shape, the same way a real search index does not keep five parallel collections. See the `marketlab.retrieval.types` docstring. |
 | §13 | Arms A/B/C/D plus placebos B′/C′ | The four arms encoded as a **crossed 2×2** of `(memory, reflection)` grants — A neither, B memory, C both, D reflection only — with B′/C′ as matched placebos of B and C | The specification names the six conditions; what each one *grants* is this implementation's reading, **decided and closed** rather than left open. A crossed design is the only arrangement of four arms that separates the memory and reflection effects instead of confounding them: without D, a C-versus-A difference cannot be attributed to either factor. D is coherent because the two channels are defined as separable — memory is raw episodic recall, reflection is distilled strategy produced by a process that reads the run's record. Under D the *reflection process* reads history; the agent does not. See `marketlab.experiments.arms.Channel`. |
 | §13.4 | Randomised arm order | A deterministic Fisher-Yates over an explicit SHA-256 key stream, not `random.shuffle` | `random.Random` guarantees reproducibility of `random()` for a seed, but `shuffle`/`sample` are implementation details that have changed between CPython versions. A replay may run years after collection, on a different interpreter. See the `marketlab.experiments.ordering` docstring. |
+| §17.4 | Lot-level position tracking | Positions stored as immutable open/close **events**, with lots folded on read | A `quantity_remaining` column decremented on every sale is an in-place edit of a past fact, which §P4 forbids and the append-only triggers refuse. Folding also makes "what did the book hold at instant *t*" answerable for every *t*. See `marketlab.accounting.positions`. |
+| §17.1 | Debit/credit entries | One **signed** amount per entry, positive debits | A `direction` enum beside an unsigned amount turns the balance check into a conditional sum, which is a place to get the sign wrong. With signed amounts, "this balances" is literally addition. |
 | §12.1 | A provider's own tool-calling wire format | A custom, provider-independent request/response loop (`ModelRequest`/`ModelResponse`/`ToolCallRequest`/`ToolCallResult`) | Mirroring one real provider's exact shape would make that provider's quirks look like part of the platform's core contract. `marketlab.agents.decision.DecisionAgent` drives this loop generically; a real Phase 3 adapter translates to and from its provider's own format at the edge. See the `marketlab.models.types` docstring. |
 
 ## Open questions for the study owner
@@ -254,13 +302,19 @@ Each is deliberate; none is silent.
    to enforce, not because 20 is scientifically motivated. Real values should
    come out of task #4's API cost model together with the decision cadence
    (open question 2), since both drive the same per-cycle cost budget.
-5. **Repetitions per arm.** `RunConfig.repetitions` defaults to 1. The right
+5. **Starting capital and target weight.** The integration test funds
+   1,000,000 USD + 500,000 EUR per condition at a 5% target weight, and the
+   unit tests use 100,000 at 10%. Neither is pre-registered. The figures
+   interact with the fee minimum (which makes small orders uneconomic) and
+   with the participation cap, so they should be fixed once alongside the
+   decision cadence (question 2).
+6. **Repetitions per arm.** `RunConfig.repetitions` defaults to 1. The right
    value depends on within-condition variance, which nothing has measured yet
    — it is one of the quantities task #4's power simulation exists to
    estimate. Independent repetitions are what separate "this arm decides
    differently" from "this model is nondeterministic", so 1 is a placeholder,
    not a recommendation.
-6. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
+7. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
    treats a snapshot as `DEGRADED`/`INVALID` based on missing *price* data for
    actively-tradable instruments only, and treats missing news/macro/FX as
    normal rather than degrading. If the specification intends a stricter or
