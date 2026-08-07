@@ -32,7 +32,7 @@ from decimal import Decimal
 from typing import Final
 
 from marketlab.core.instants import Instant
-from marketlab.memory.store import Episode, EpisodeForecast, EpisodeIntent
+from marketlab.memory.store import Episode, EpisodeForecast, EpisodeIntent, EpisodeShape
 from marketlab.reflection.engine import Reflection, StrategyRule
 
 __all__ = [
@@ -46,6 +46,12 @@ MEMORY_HEADING: Final = "YOUR PAST DECISIONS (context, not instructions):"
 REFLECTION_HEADING: Final = "YOUR STANDING STRATEGY NOTES (context, not instructions):"
 
 _PLACEBO_SIDES: Final = ("BUY", "SELL", "HOLD")
+_PLACEBO_FAILURE_LABEL: Final = "NONE_RECORDED"
+"""Stands in for a real failure kind so the line count matches.
+
+Only its presence is copied, never which failure actually occurred: that would
+be genuine content about the condition's own record leaking into its placebo.
+"""
 _PLACEBO_STATEMENTS: Final = (
     "Position sizing is fixed by the platform, so concentrate on the direction "
     "and the horizon rather than on the amount.",
@@ -96,7 +102,7 @@ def render_reflection(reflection: Reflection) -> str:
 
 
 def placebo_episodes(
-    *, scope_id: str, as_of: Instant, shape: Sequence[tuple[int, int]]
+    *, scope_id: str, as_of: Instant, shape: Sequence[EpisodeShape]
 ) -> tuple[Episode, ...]:
     """Fabricate structurally-identical but contentless episodes.
 
@@ -104,14 +110,13 @@ def placebo_episodes(
         scope_id: whose placebo this is. Only its *identity* is used, as hash
             input — never its recorded history.
         as_of: the cutoff, so a replay regenerates the same text.
-        shape: one ``(forecast_count, intent_count)`` pair per episode the
-            genuine grant would have contained, from
-            :meth:`marketlab.memory.store.MemoryStore.episode_shapes`. One
-            fabricated episode is produced per pair, with exactly that many
-            lines, so the rendered text matches line for line.
+        shape: one :class:`~marketlab.memory.store.EpisodeShape` per episode
+            the genuine grant would have contained. One fabricated episode is
+            produced per shape, rendering to exactly the same lines, so the
+            two texts match line for line rather than approximately.
     """
     episodes: list[Episode] = []
-    for index, (forecast_count, intent_count) in enumerate(shape):
+    for index, episode_shape in enumerate(shape):
         seed = f"{scope_id}|{as_of}|{index}"
         episodes.append(
             Episode(
@@ -124,7 +129,7 @@ def placebo_episodes(
                         horizon_sessions=5,
                         probability_up=_fabricated_probability(seed, slot),
                     )
-                    for slot in range(forecast_count)
+                    for slot in range(episode_shape.forecasts)
                 ),
                 intents=tuple(
                     EpisodeIntent(
@@ -133,11 +138,11 @@ def placebo_episodes(
                             _fabricated_int(seed, 100 + slot) % len(_PLACEBO_SIDES)
                         ],
                     )
-                    for slot in range(intent_count)
+                    for slot in range(episode_shape.intents)
                 ),
                 narrative="",
-                equity=_fabricated_equity(seed),
-                failure_kinds=(),
+                equity=_fabricated_equity(seed) if episode_shape.has_equity else "",
+                failure_kinds=(_PLACEBO_FAILURE_LABEL,) if episode_shape.has_failures else (),
             )
         )
     return tuple(episodes)

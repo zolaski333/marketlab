@@ -392,3 +392,44 @@ def test_rendered_memory_frames_itself_as_context_not_instruction(rig: Rig) -> N
     _remember(rig, 3)
     rendered = render_memory(rig.memory.recall(_scope(), before=at(4)))
     assert "not instructions" in rendered
+
+
+def test_a_placebo_matches_the_shape_of_episodes_that_carry_no_equity(rig: Rig) -> None:
+    """Found by tests/integration/test_materials_wiring.py: a placebo that
+    always emitted an equity line was 6% longer than a genuine memory whose
+    episodes carried none. The shape a placebo copies now includes whether
+    those lines exist, not only how many forecasts there were."""
+    for day in (3, 4, 5, 6):
+        rig.recorder.record(
+            arm_id=ArmId.B,
+            repetition=0,
+            cycle_id=f"cycle-{day}",
+            bundle_id=f"bundle-B-{day}",
+            as_of=at(day),
+            outcome=_outcome(),
+            equity=None,
+        )
+        rig.recorder.record(
+            arm_id=ArmId.B_PRIME,
+            repetition=0,
+            cycle_id=f"cycle-{day}",
+            bundle_id=f"bundle-BP-{day}",
+            as_of=at(day),
+            outcome=_outcome(),
+            equity=None,
+        )
+    genuine = _materials(rig, ArmId.B)
+    placebo = _materials(rig, ArmId.B_PRIME)
+    assert genuine is not None and placebo is not None
+    assert placebo.count("\n") == genuine.count("\n")
+    assert "portfolio value" not in placebo
+
+
+def test_a_placebo_never_names_which_failure_actually_occurred(rig: Rig) -> None:
+    failure = (ObservedAgentFailure(kind=AgentFailureKind.REFUSAL, detail="no", occurred_at=at(3)),)
+    for day in (3, 4, 5, 6):
+        _remember(rig, day, arm=ArmId.B_PRIME, failures=failure)
+    placebo = _materials(rig, ArmId.B_PRIME)
+    assert placebo is not None
+    assert "recorded issues" in placebo  # the line exists, so the shape matches
+    assert "REFUSAL" not in placebo  # but not which one it was

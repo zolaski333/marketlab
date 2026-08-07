@@ -53,6 +53,7 @@ __all__ = [
     "Episode",
     "EpisodeForecast",
     "EpisodeIntent",
+    "EpisodeShape",
     "MemoryEpisodeRow",
     "MemoryStore",
     "memory_scope_id",
@@ -86,6 +87,7 @@ class MemoryEpisodeRow(Base):
     payload_blob_hash: Mapped[str] = mapped_column(HashStr, nullable=False)
     forecast_count: Mapped[int] = mapped_column(Integer, nullable=False)
     intent_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     equity: Mapped[str] = mapped_column(ShortStr, nullable=False, default="")
 
 
@@ -100,6 +102,20 @@ class EpisodeForecast:
 class EpisodeIntent:
     instrument_id: str
     side: str
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeShape:
+    """How many lines an episode renders to, and nothing about what they say.
+
+    This is what a placebo copies. Every field is a count or a flag read
+    straight off :class:`MemoryEpisodeRow`; none of them can carry content.
+    """
+
+    forecasts: int
+    intents: int
+    has_equity: bool
+    has_failures: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +185,7 @@ class MemoryStore:
                 payload_blob_hash=blob.digest,
                 forecast_count=len(episode.forecasts),
                 intent_count=len(episode.intents),
+                failure_count=len(episode.failure_kinds),
                 equity=episode.equity,
             )
         )
@@ -210,8 +227,8 @@ class MemoryStore:
 
     def episode_shapes(
         self, scope_id: str, *, before: Instant, limit: int = DEFAULT_RECALL_LIMIT
-    ) -> tuple[tuple[int, int], ...]:
-        """``(forecast_count, intent_count)`` per recallable episode, oldest first.
+    ) -> tuple[EpisodeShape, ...]:
+        """The rendered shape of each recallable episode, oldest first.
 
         This is how the placebo generator sizes its output to match the
         genuine article. It reads **two integer columns and nothing else** —
@@ -224,7 +241,12 @@ class MemoryStore:
             return ()
         rows = list(
             self._session.execute(
-                select(MemoryEpisodeRow.forecast_count, MemoryEpisodeRow.intent_count)
+                select(
+                    MemoryEpisodeRow.forecast_count,
+                    MemoryEpisodeRow.intent_count,
+                    MemoryEpisodeRow.failure_count,
+                    MemoryEpisodeRow.equity,
+                )
                 .where(MemoryEpisodeRow.scope_id == scope_id)
                 .where(MemoryEpisodeRow.as_of < str(before))
                 .order_by(MemoryEpisodeRow.as_of.desc(), MemoryEpisodeRow.episode_id.desc())
@@ -232,7 +254,15 @@ class MemoryStore:
             )
         )
         rows.reverse()
-        return tuple((int(row[0]), int(row[1])) for row in rows)
+        return tuple(
+            EpisodeShape(
+                forecasts=int(row[0]),
+                intents=int(row[1]),
+                has_equity=bool(row[3]),
+                has_failures=int(row[2]) > 0,
+            )
+            for row in rows
+        )
 
     def _load(self, row: MemoryEpisodeRow) -> Episode:
         payload = json.loads(self._blobs.get(row.payload_blob_hash))
