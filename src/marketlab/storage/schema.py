@@ -18,6 +18,7 @@ from __future__ import annotations
 from marketlab.accounting.ledger import LedgerEntryRow, LedgerTransactionRow
 from marketlab.accounting.positions import PositionEventRow
 from marketlab.audit.roots import DailyRootRow
+from marketlab.execution.engine import FillRow, OrderRejectionRow, OrderRow, SettlementRow
 from marketlab.experiments.runner import DecisionBundleRow
 from marketlab.instruments.repository import InstrumentRow, InstrumentVersionRow
 from marketlab.snapshots.builder import SnapshotMemberRow, SnapshotRow
@@ -31,11 +32,15 @@ __all__ = [
     "DailyRootRow",
     "DecisionBundleRow",
     "EventRow",
+    "FillRow",
     "InstrumentRow",
     "InstrumentVersionRow",
     "LedgerEntryRow",
     "LedgerTransactionRow",
+    "OrderRejectionRow",
+    "OrderRow",
     "PositionEventRow",
+    "SettlementRow",
     "SnapshotMemberRow",
     "SnapshotRow",
     "table_names",
