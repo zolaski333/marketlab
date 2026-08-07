@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 279 tests passing, `mypy --strict` clean on 47 source files.
+Last verified: 359 tests passing, `mypy --strict` clean on 51 source files.
 
 ---
 
@@ -97,7 +97,10 @@ Last verified: 279 tests passing, `mypy --strict` clean on 47 source files.
 | Deterministic policy fake with **no access to `condition_id`** | `done` | `tests/unit/test_deterministic_policy.py`, structural guard in `tests/security/test_condition_isolation.py` |
 | Decision orchestration loop — tool-calling, citation validation, failure taxonomy (§10, §14.5) | `done` | `tests/unit/test_decision_agent.py` |
 | Prompt-injection containment (§11.2) | `done` | `tests/security/test_prompt_injection_containment.py` |
-| Arms A / B / C / D **and placebos B′ / C′** | `not started` | — |
+| Arms A / B / C / D **and placebos B′ / C′** — declared as crossed grants, matching checked structurally | `done` | `tests/unit/test_arms.py` |
+| Randomised / counterbalanced execution order (§13.4, §30.3) | `done` | `tests/unit/test_ordering.py` |
+| Multi-arm cycle runner — shared frozen snapshot, isolated repetitions, sealed decision bundles | `done` | `tests/unit/test_cycle_runner.py`, `tests/integration/test_multi_arm_wiring.py` |
+| Condition isolation verified on **content**, not only on field names | `done` | `tests/security/test_condition_isolation.py` |
 | Virtual execution at the next eligible window (§16.2) | `not started` | — |
 | Double-entry ledger, settlement, corporate actions (§17) | `not started` | — |
 | Memory, reflection, imposed panel (§18, §19, §15) | `not started` | — |
@@ -127,8 +130,9 @@ Last verified: 279 tests passing, `mypy --strict` clean on 47 source files.
   snapshot and withheld from earlier ones — but nothing yet drives that
   application automatically from an ingested `CORPORATE_ACTION` record.
   Dividends and splits reaching the ledger and position lots is task 10's
-  job; ticker/status changes reaching the repository automatically is
-  whichever of task 9's cycle runner or task 10 ends up owning that step.
+  job. Task 9's cycle runner does **not** apply corporate actions either —
+  it consumes an already-frozen snapshot and never writes to the instrument
+  repository — so the whole of that step now belongs to task 10.
 - **`SnapshotStatus` completeness (§23.2) is this implementation's
   interpretation, not a quotation of the specification.** `COMPLETE` requires
   every actively-tradable instrument to have a fresh price bar this session;
@@ -149,13 +153,48 @@ Last verified: 279 tests passing, `mypy --strict` clean on 47 source files.
   build the interface and a deterministic fake; a real Phase 3 adapter
   (OpenAI, Anthropic, ...) implements the same `LanguageModel` Protocol
   without touching any of its callers.
-- **`DecisionOutcome` carries no `bundle_id`.** `marketlab.agents.decision`
-  structurally cannot know the run id, arm id, or repetition number —
-  knowing them would itself be the condition leak this layer exists to
-  prevent — so it does not mint the final decision-bundle identity. The
-  caller (task 9's runner), which holds those routing keys, derives
-  `IdKind.DECISION_BUNDLE` from this outcome's content plus them when it
-  persists the result. See the `marketlab.agents.decision` docstring.
+- **Every arm currently receives nothing.** This is the largest gap in what
+  task 9 marks `done`, and it is a gap in *content*, not in machinery. The
+  conditions are declared, ordered, isolated, identified and sealed, but the
+  only shipped `ConditionMaterialsProvider` is `NullMaterialsProvider`, which
+  grants no material to any arm — so a run today produces six conditions that
+  are genuinely indistinguishable. The real memory, reflection and matched
+  placebo generators are task 11. Until they land, **no comparison between
+  arms means anything**; what the passing tests establish is that the
+  plumbing carrying that comparison is sound, which is a different and much
+  weaker claim.
+- **`DecisionOutcome` still carries no `bundle_id`, by design.**
+  `marketlab.agents.decision` structurally cannot know the run id, arm id, or
+  repetition number — knowing them would itself be the condition leak that
+  layer exists to prevent. `marketlab.experiments.runner.CycleRunner`, which
+  holds those routing keys, now derives `IdKind.DECISION_BUNDLE` from them
+  and persists the result, so the deferral recorded here for task 8 is
+  closed.
+- **The Latin square balances position, not carryover.** Cyclic rotation
+  gives every arm every position exactly once per rotation, but does not
+  balance *which arm ran immediately before which*. A Williams design would;
+  it matters only if an arm's execution measurably affects the next one's,
+  which under the current isolation (fresh model instance, fresh budget, no
+  shared memory) there is no mechanism for. Revisit if task 11's memory
+  subsystem ever introduces cross-arm state.
+- **`CONDITION_MISSING` is recorded but not yet acted on.** A provider outage
+  produces a `MissingCondition`, an event, and no bundle — correct as far as
+  it goes. §23.4's paired policy (what the analysis does with an incomplete
+  cycle: drop the pair, drop the cycle, impute) is a statistical decision
+  belonging to task 12, and nothing currently enforces one.
+- **A run's configuration is not persisted.** `RunConfig` carries the
+  pre-registered parameters (arms, repetitions, seed, order policy, budgets)
+  and every cycle event references `run_id`, but the config itself lives only
+  in the caller. Reconstructing what a historical run was configured to do
+  currently means reading the code that launched it. A `runs` table belongs
+  with the CLI (task 13), which is what will actually construct these.
+- **`decision_content_hash` deliberately excludes failures and process
+  metrics.** Two identical decisions reached in a different number of turns
+  hash the same. That is the right default for "did these two conditions
+  decide the same thing", but it means an arm comparison keyed on
+  `content_hash` alone would not notice that one arm got there while emitting
+  three malformed outputs. Those counts are on `decision_bundles` for the
+  analyses that care.
 - **`RawDecision` covers forecasts and trade intents only.** `IdKind.CLAIM`
   and `IdKind.CONSIDERATION` remain types without call sites (like
   `FailureScope`/`ObservedAgentFailure` were in Phase 0) — a fuller
@@ -190,6 +229,8 @@ Each is deliberate; none is silent.
 | §8.1 | One adapter per provider protocol | One `SyntheticMarketDataProvider` implementing all five protocols | Honest for a *synthetic* world: a fabricated script can coherently derive news, prices and corporate actions from one source of truth. Real Phase 3 adapters will not share this shape — each gets its own adapter for its own source. See the `marketlab.ingestion.synthetic` docstring. |
 | §7.1 | `InstrumentVersion` carries an explicit validity period | No stored `effective_to` column | Storing one would mean mutating the previous version's row the moment a new one is written — exactly the in-place edit append-only storage forbids. "Current as of a cutoff" is instead computed as the latest version whose `effective_from` does not exceed it. See the `marketlab.instruments.repository` docstring. |
 | §8.1 | Five raw record kinds, each with its own shape | One uniform `Evidence` type (`kind` + `subject_ids` + `fields`) in the retrieval layer | The raw ingestion types (`RawPriceBar`, `RawNewsItem`, ...) stay precisely typed; only the frozen, agent-facing view collapses them into one searchable, citable shape, the same way a real search index does not keep five parallel collections. See the `marketlab.retrieval.types` docstring. |
+| §13 | Arms A/B/C/D plus placebos B′/C′ | The four arms encoded as a **crossed 2×2** of `(memory, reflection)` grants — A neither, B memory, C both, D reflection only — with B′/C′ as matched placebos of B and C | The specification names the six conditions; what each one *grants* is this implementation's reading of them. A crossed design is the only arrangement of four arms that separates the memory and reflection effects instead of confounding them, and it makes exactly two placebos the right number. Recorded as an open question below; `marketlab.experiments.arms.ARMS` is the single table to change if the study owner intends a different mapping. |
+| §13.4 | Randomised arm order | A deterministic Fisher-Yates over an explicit SHA-256 key stream, not `random.shuffle` | `random.Random` guarantees reproducibility of `random()` for a seed, but `shuffle`/`sample` are implementation details that have changed between CPython versions. A replay may run years after collection, on a different interpreter. See the `marketlab.experiments.ordering` docstring. |
 | §12.1 | A provider's own tool-calling wire format | A custom, provider-independent request/response loop (`ModelRequest`/`ModelResponse`/`ToolCallRequest`/`ToolCallResult`) | Mirroring one real provider's exact shape would make that provider's quirks look like part of the platform's core contract. `marketlab.agents.decision.DecisionAgent` drives this loop generically; a real Phase 3 adapter translates to and from its provider's own format at the edge. See the `marketlab.models.types` docstring. |
 
 ## Open questions for the study owner
@@ -213,7 +254,19 @@ Each is deliberate; none is silent.
    to enforce, not because 20 is scientifically motivated. Real values should
    come out of task #4's API cost model together with the decision cadence
    (open question 2), since both drive the same per-cycle cost budget.
-5. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
+5. **What each arm grants (§13).** `marketlab.experiments.arms` encodes A/B/C/D
+   as a crossed 2×2 of memory × reflection, with D as reflection-without-memory
+   — see the departures table. Confirm this is the intended design, and in
+   particular confirm that D is a condition the study wants at all: an agent
+   reflecting on strategy with no persistent memory to reflect *over* is a
+   coherent cell of the design but an unusual thing to build in practice.
+6. **Repetitions per arm.** `RunConfig.repetitions` defaults to 1. The right
+   value depends on within-condition variance, which nothing has measured yet
+   — it is one of the quantities task #4's power simulation exists to
+   estimate. Independent repetitions are what separate "this arm decides
+   differently" from "this model is nondeterministic", so 1 is a placeholder,
+   not a recommendation.
+7. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
    treats a snapshot as `DEGRADED`/`INVALID` based on missing *price* data for
    actively-tradable instruments only, and treats missing news/macro/FX as
    normal rather than degrading. If the specification intends a stricter or
