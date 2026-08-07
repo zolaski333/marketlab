@@ -225,3 +225,42 @@ def test_position_events_are_append_only(
     session.commit()
     with pytest.raises(SqlIntegrityError, match="append-only"), database.engine.begin() as conn:
         conn.execute(text("UPDATE position_events SET quantity_delta = '999'"))
+
+
+# ---------------------------------------------------------------------------
+# Ordering within one instant
+# ---------------------------------------------------------------------------
+
+
+def test_a_split_and_a_sale_in_the_same_session_preserve_the_cost_basis(
+    book: PositionBook,
+) -> None:
+    """Every event of one session shares that session's cutoff, so the fold
+    order is decided by `sequence`, not by the timestamp. Replaying the sale
+    before the split would subtract from the same lot twice, drive it negative
+    and silently drop it - losing its cost basis outright. Found by
+    tests/integration/test_execution_wiring.py, pinned here."""
+    _open(book, "100", "150.00", day=3, reference_id="f-1")
+    book.apply_split(
+        portfolio_id=PORTFOLIO,
+        instrument_id=ALPHA,
+        ratio=Decimal("2"),
+        occurred_at=at(5),
+        reference_id="ca-1",
+    )
+    _close(book, "50", day=5, reference_id="f-2")
+
+    lots = book.open_lots(PORTFOLIO, ALPHA)
+    assert book.quantity_of(PORTFOLIO, ALPHA) == Decimal("150")
+    assert sum(lot.cost_basis.amount for lot in lots) == Decimal("11250.00")
+
+
+def test_a_sale_cannot_consume_a_lot_bought_in_the_same_session(
+    book: PositionBook,
+) -> None:
+    """T+N means a same-session purchase is not yours to sell yet, so the fold
+    ranks purchases after sales rather than letting one feed the other."""
+    _open(book, "10", "100.00", day=3, reference_id="f-1")
+    _open(book, "10", "200.00", day=5, reference_id="f-2")
+    consumed = _close(book, "10", day=5, reference_id="f-3")
+    assert [c.unit_cost for c in consumed] == [Decimal("100.00")]  # type: ignore[attr-defined]

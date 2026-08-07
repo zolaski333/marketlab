@@ -31,9 +31,10 @@ share-count integer would either forbid it or silently truncate it.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Final
 
 from sqlalchemy import select
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -57,6 +58,32 @@ __all__ = [
     "PositionEventRow",
 ]
 
+_SEQUENCE_RANK: Final[Mapping[str, int]] = {
+    "SPLIT_OUT": 1,
+    "SPLIT_IN": 2,
+    "CLOSE": 3,
+    "OPEN": 4,
+}
+"""Order of position events *within one instant*.
+
+Every event of one session carries that session's cutoff, so the timestamp
+alone cannot order them and the fold would be free to replay them in any
+order. That is not a cosmetic concern: a split closes a lot at the quantity it
+had when the split ran, so replaying a same-session sale *before* the split
+subtracts from that lot twice, drives it negative, and silently drops it —
+losing its cost basis outright.
+
+The ranks therefore encode the order the cycle actually performs:
+
+1-2. Corporate actions, applied before the session's fills. Buying on a
+     dividend's ex-date does not entitle you to it, and a split re-denominates
+     the position you *held*, not the one you are about to buy.
+3.   Sales, which consume lots that existed before this session.
+4.   Purchases, whose lots are therefore not available to same-session sales —
+     which matches reality, since T+N settlement means they are not yours to
+     sell yet either.
+"""
+
 
 class PositionEventRow(Base):
     """One immutable change to a position: an opening or a closing.
@@ -74,8 +101,7 @@ class PositionEventRow(Base):
     lot_id: Mapped[str] = mapped_column(HashStr, nullable=False, index=True)
     occurred_at: Mapped[str] = mapped_column(InstantStr, nullable=False, index=True)
     sequence: Mapped[str] = mapped_column(ShortStr, nullable=False)
-    """Tie-break for events sharing an instant — a settlement and a corporate
-    action can land on the same timestamp, and fold order must be defined."""
+    """Order within one instant. See :data:`_SEQUENCE_RANK`."""
 
     quantity_delta: Mapped[str] = mapped_column(DecimalStr, nullable=False)
     unit_cost: Mapped[str] = mapped_column(DecimalStr, nullable=False)
@@ -166,7 +192,7 @@ class PositionBook:
             instrument_id=instrument_id,
             lot_id=lot_id,
             occurred_at=occurred_at,
-            sequence=f"0-{reason}",
+            sequence=f"{_SEQUENCE_RANK['OPEN']}-{reason}",
             quantity_delta=quantity,
             unit_cost=unit_cost,
             currency=currency,
@@ -235,7 +261,7 @@ class PositionBook:
                 instrument_id=instrument_id,
                 lot_id=lot.lot_id,
                 occurred_at=occurred_at,
-                sequence=f"1-{reason}-{index}",
+                sequence=f"{_SEQUENCE_RANK['CLOSE']}-{reason}-{index}",
                 quantity_delta=-taken,
                 unit_cost=lot.unit_cost,
                 currency=lot.currency,
@@ -281,7 +307,7 @@ class PositionBook:
                 instrument_id=instrument_id,
                 lot_id=lot.lot_id,
                 occurred_at=occurred_at,
-                sequence=f"2-SPLIT_OUT-{index}",
+                sequence=f"{_SEQUENCE_RANK['SPLIT_OUT']}-SPLIT_OUT-{index}",
                 quantity_delta=-lot.quantity,
                 unit_cost=lot.unit_cost,
                 currency=lot.currency,
@@ -298,7 +324,7 @@ class PositionBook:
                     reference_id=reference_id,
                 ),
                 occurred_at=occurred_at,
-                sequence=f"3-SPLIT_IN-{index}",
+                sequence=f"{_SEQUENCE_RANK['SPLIT_IN']}-SPLIT_IN-{index}",
                 quantity_delta=lot.quantity * ratio,
                 unit_cost=lot.unit_cost / ratio,
                 currency=lot.currency,
