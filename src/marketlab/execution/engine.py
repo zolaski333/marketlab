@@ -114,7 +114,7 @@ not modelled — and an empty market is not the agent's doing.
 
 def portfolio_id_for(run_id: str, arm_id: str, repetition: int) -> str:
     """The book one condition trades in. Distinct per repetition (§30.3)."""
-    return derive_id(IdKind.ORDER, run_id=run_id, arm_id=arm_id, repetition=repetition)
+    return derive_id(IdKind.PORTFOLIO, run_id=run_id, arm_id=arm_id, repetition=repetition)
 
 
 class OrderRow(Base):

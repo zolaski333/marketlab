@@ -82,6 +82,8 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "order_rejections",
         "settlements",
         "corporate_action_applications",
+        "memory_episodes",
+        "reflections",
     }
 )
 

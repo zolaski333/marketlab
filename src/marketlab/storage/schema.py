@@ -22,6 +22,8 @@ from marketlab.execution.corporate import CorporateActionApplicationRow
 from marketlab.execution.engine import FillRow, OrderRejectionRow, OrderRow, SettlementRow
 from marketlab.experiments.runner import DecisionBundleRow
 from marketlab.instruments.repository import InstrumentRow, InstrumentVersionRow
+from marketlab.memory.store import MemoryEpisodeRow
+from marketlab.reflection.engine import ReflectionRow
 from marketlab.snapshots.builder import SnapshotMemberRow, SnapshotRow
 from marketlab.storage.base import Base
 from marketlab.storage.blobs import BlobMetadataRow
@@ -39,9 +41,11 @@ __all__ = [
     "InstrumentVersionRow",
     "LedgerEntryRow",
     "LedgerTransactionRow",
+    "MemoryEpisodeRow",
     "OrderRejectionRow",
     "OrderRow",
     "PositionEventRow",
+    "ReflectionRow",
     "SettlementRow",
     "SnapshotMemberRow",
     "SnapshotRow",
