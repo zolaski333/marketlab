@@ -18,6 +18,7 @@ from __future__ import annotations
 from marketlab.accounting.ledger import LedgerEntryRow, LedgerTransactionRow
 from marketlab.accounting.positions import PositionEventRow
 from marketlab.audit.roots import DailyRootRow
+from marketlab.execution.corporate import CorporateActionApplicationRow
 from marketlab.execution.engine import FillRow, OrderRejectionRow, OrderRow, SettlementRow
 from marketlab.experiments.runner import DecisionBundleRow
 from marketlab.instruments.repository import InstrumentRow, InstrumentVersionRow
@@ -29,6 +30,7 @@ from marketlab.storage.events import EventRow
 __all__ = [
     "Base",
     "BlobMetadataRow",
+    "CorporateActionApplicationRow",
     "DailyRootRow",
     "DecisionBundleRow",
     "EventRow",

@@ -244,6 +244,69 @@ class PositionBook:
             )
         return tuple(consumptions)
 
+    def apply_split(
+        self,
+        *,
+        portfolio_id: str,
+        instrument_id: str,
+        ratio: Decimal,
+        occurred_at: Instant,
+        reference_id: str,
+    ) -> tuple[Lot, ...]:
+        """Re-denominate every open lot by ``ratio``, preserving cost basis.
+
+        A split changes how many units a holding is expressed in, not what it
+        is worth: a 2-for-1 doubles the count and halves the unit cost, so the
+        position account never moves and no ledger entry is produced. Booking
+        one would invent a gain out of a renaming.
+
+        Each lot is closed and reopened *individually* rather than the position
+        being collapsed and reissued as one parcel. Merging them would preserve
+        the total cost basis but destroy the FIFO ordering, quietly changing
+        the realised gain of every future sale.
+
+        Raises:
+            AccountingError: on a non-positive ratio.
+        """
+        if ratio <= 0:
+            raise AccountingError(
+                f"Split ratio must be positive, got {ratio}.",
+                instrument_id=instrument_id,
+                ratio=str(ratio),
+            )
+        lots = self.open_lots(portfolio_id, instrument_id, as_of=occurred_at)
+        for index, lot in enumerate(lots):
+            self._append(
+                portfolio_id=portfolio_id,
+                instrument_id=instrument_id,
+                lot_id=lot.lot_id,
+                occurred_at=occurred_at,
+                sequence=f"2-SPLIT_OUT-{index}",
+                quantity_delta=-lot.quantity,
+                unit_cost=lot.unit_cost,
+                currency=lot.currency,
+                reason="SPLIT_OUT",
+                reference_id=reference_id,
+            )
+            self._append(
+                portfolio_id=portfolio_id,
+                instrument_id=instrument_id,
+                lot_id=derive_id(
+                    IdKind.POSITION_EVENT,
+                    portfolio_id=portfolio_id,
+                    predecessor_lot_id=lot.lot_id,
+                    reference_id=reference_id,
+                ),
+                occurred_at=occurred_at,
+                sequence=f"3-SPLIT_IN-{index}",
+                quantity_delta=lot.quantity * ratio,
+                unit_cost=lot.unit_cost / ratio,
+                currency=lot.currency,
+                reason="SPLIT_IN",
+                reference_id=reference_id,
+            )
+        return self.open_lots(portfolio_id, instrument_id, as_of=occurred_at)
+
     def _append(
         self,
         *,
