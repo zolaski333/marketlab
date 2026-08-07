@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 478 tests passing, `mypy --strict` clean on 59 source files.
+Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
 
 ---
 
@@ -109,7 +109,11 @@ Last verified: 478 tests passing, `mypy --strict` clean on 59 source files.
 | Settlement at T+N on the instrument's own calendar | `done` | `tests/unit/test_execution_engine.py` |
 | Corporate actions applied to books and reference data (§17.5) | `done` | `tests/unit/test_corporate_actions.py` |
 | Whole cycle wired end to end over the synthetic world | `done` | `tests/integration/test_execution_wiring.py` |
-| Memory, reflection, imposed panel (§18, §19, §15) | `not started` | — |
+| Persistent episodic memory with a strict point-in-time recall (§18) | `done` | `tests/unit/test_memory_materials.py` |
+| Periodic strategic reflection (§19) | `done` | `tests/unit/test_memory_materials.py` |
+| Matched placebo memory and reflection for B′ / C′ (§13) | `done` | `tests/unit/test_memory_materials.py` |
+| Imposed, isolated forecast panel (§15) | `done` | `tests/unit/test_panel.py` |
+| Six conditions wired end to end and genuinely distinguishable | `done` | `tests/integration/test_materials_wiring.py` |
 | Forecast resolution and the statistical plan (§20, §21) | `not started` | — |
 | Real replay that recomputes and compares (§12.5, §30.4) | `not started` | — |
 | CLI (§29) | `not started` | — |
@@ -199,16 +203,48 @@ Last verified: 478 tests passing, `mypy --strict` clean on 59 source files.
   CLI (task 13) is where that sequence should become a single supported entry
   point rather than a convention two places agree on.
 
-- **Every arm currently receives nothing.** This is the largest gap in what
-  task 9 marks `done`, and it is a gap in *content*, not in machinery. The
-  conditions are declared, ordered, isolated, identified and sealed, but the
-  only shipped `ConditionMaterialsProvider` is `NullMaterialsProvider`, which
-  grants no material to any arm — so a run today produces six conditions that
-  are genuinely indistinguishable. The real memory, reflection and matched
-  placebo generators are task 11. Until they land, **no comparison between
-  arms means anything**; what the passing tests establish is that the
-  plumbing carrying that comparison is sound, which is a different and much
-  weaker claim.
+- **Granted material reaches the model, but the shipped fake ignores it.**
+  `DeterministicPolicyModel` is a closed-form function of the closing price
+  and does not read `injected_context`, so a run today shows the arms
+  different things and gets identical decisions from all six. This is
+  deliberate and pinned by a test: a fake that branched on its injected
+  context would manufacture a memory effect out of nothing — the exact defect
+  the audit found in this project's predecessor. **The consequence for the
+  study is blunt: no arm comparison run against the fake means anything about
+  memory or reflection.** What is established is that the channel is live —
+  `tests/integration/test_materials_wiring.py` drives a test double that does
+  read its context and gets different decisions per arm through the same
+  pipeline. Demonstrating a real effect needs a real provider (Phase 3).
+- **Reflection says nothing about whether forecasts came true.** The rules are
+  about the condition's own behaviour — persistence on one side, churn,
+  probabilities that barely move, recurring malformed output. Hit rates and
+  calibration need forecast resolution, which is task 12. A rule claiming
+  accuracy today would be fabricated, and a test asserts none of them does.
+- **Reflection is closed-form, not model-authored.** A real deployment would
+  ask a model to reflect. The deterministic version exists so a reflection can
+  be replayed and reasoned about; swapping in a model-authored one changes no
+  caller, but it is a different treatment and would need re-piloting.
+- **A placebo matches shape, not information content.** It is matched line for
+  line and to within 2% on length, and contains no instrument, probability or
+  failure kind from the genuine record. It is *not* matched on how plausible
+  or engaging the text is, which is not measurable here — if a model can tell
+  the two apart for reasons other than content, B′ stops being a control.
+- **Placebo reflection carries a fixed three rules.** Matching the genuine
+  rule count would require reading the genuine reflection, which for C′ means
+  reading C's. The resulting length difference is bounded and measured, not
+  assumed.
+- **Recall depth and reflection cadence are placeholders.** Eight episodes and
+  every five cycles are round numbers, like the tool budget. Both trade
+  context cost against how much history a condition can see, and both depend
+  on the still-open API cost model (task #4).
+- **The panel is elicited but not yet persisted or scored.** `PanelAgent`
+  produces answers and records `MISSING_PANEL_ITEM` for unanswered items, but
+  nothing stores a panel bundle, and scoring the answers is task 12. Today the
+  panel is exercised in tests rather than run inside `CycleRunner`.
+- **Memory records what a condition decided, not what happened to it.**
+  There is no outcome feedback in an episode, because resolution does not
+  exist yet. That makes the memory treatment weaker than a real one would be,
+  and is the single largest thing task 12 will change about it.
 - **`DecisionOutcome` still carries no `bundle_id`, by design.**
   `marketlab.agents.decision` structurally cannot know the run id, arm id, or
   repetition number — knowing them would itself be the condition leak that
@@ -279,6 +315,8 @@ Each is deliberate; none is silent.
 | §13.4 | Randomised arm order | A deterministic Fisher-Yates over an explicit SHA-256 key stream, not `random.shuffle` | `random.Random` guarantees reproducibility of `random()` for a seed, but `shuffle`/`sample` are implementation details that have changed between CPython versions. A replay may run years after collection, on a different interpreter. See the `marketlab.experiments.ordering` docstring. |
 | §17.4 | Lot-level position tracking | Positions stored as immutable open/close **events**, with lots folded on read | A `quantity_remaining` column decremented on every sale is an in-place edit of a past fact, which §P4 forbids and the append-only triggers refuse. Folding also makes "what did the book hold at instant *t*" answerable for every *t*. See `marketlab.accounting.positions`. |
 | §17.1 | Debit/credit entries | One **signed** amount per entry, positive debits | A `direction` enum beside an unsigned amount turns the balance check into a conditional sum, which is a place to get the sign wrong. With signed amounts, "this balances" is literally addition. |
+| §13 | Placebo material for B′/C′ | The placebo reuses the **genuine renderer** over fabricated episodes, sized from the arm's own `EpisodeShape` | Hand-writing filler and hoping it came out the same length would leave the comparison confounded by whichever was longer, with no way to tell by how much. Shape is read from integer columns only, so a placebo is structurally incapable of carrying genuine content. |
+| §19 | Strategic reflection | Deterministic closed-form rules over the condition's own record, not a model-authored reflection | Phase 1 has no real provider, and a reflection produced by an opaque process could not be replayed (§12.5). Same reasoning as the deterministic policy fake. |
 | §12.1 | A provider's own tool-calling wire format | A custom, provider-independent request/response loop (`ModelRequest`/`ModelResponse`/`ToolCallRequest`/`ToolCallResult`) | Mirroring one real provider's exact shape would make that provider's quirks look like part of the platform's core contract. `marketlab.agents.decision.DecisionAgent` drives this loop generically; a real Phase 3 adapter translates to and from its provider's own format at the edge. See the `marketlab.models.types` docstring. |
 
 ## Open questions for the study owner
@@ -314,7 +352,16 @@ Each is deliberate; none is silent.
    estimate. Independent repetitions are what separate "this arm decides
    differently" from "this model is nondeterministic", so 1 is a placeholder,
    not a recommendation.
-7. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
+7. **Recall depth and reflection cadence.** Eight episodes recalled, one
+   reflection every five cycles. Both are round numbers. Deeper recall and more
+   frequent reflection are a *stronger* treatment, so these choices set the
+   effect size the study is powered to detect — they belong with the power
+   simulation (task #4), not with an implementation default.
+8. **Whether the panel should share the decision's tool budget.** The panel
+   currently gets its own, so answering it costs a condition nothing it could
+   have spent deciding. The alternative — one budget across both — would make
+   the panel a real opportunity cost and might itself differ between arms.
+9. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
    treats a snapshot as `DEGRADED`/`INVALID` based on missing *price* data for
    actively-tradable instruments only, and treats missing news/macro/FX as
    normal rather than degrading. If the specification intends a stricter or
