@@ -73,6 +73,7 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "instrument_versions",
         "snapshots",
         "snapshot_members",
+        "decision_bundles",
     }
 )
 

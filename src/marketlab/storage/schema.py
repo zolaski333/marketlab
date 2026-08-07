@@ -16,6 +16,7 @@ Tables are grouped by the pipeline stage that owns them, mirroring §27.
 from __future__ import annotations
 
 from marketlab.audit.roots import DailyRootRow
+from marketlab.experiments.runner import DecisionBundleRow
 from marketlab.instruments.repository import InstrumentRow, InstrumentVersionRow
 from marketlab.snapshots.builder import SnapshotMemberRow, SnapshotRow
 from marketlab.storage.base import Base
@@ -26,6 +27,7 @@ __all__ = [
     "Base",
     "BlobMetadataRow",
     "DailyRootRow",
+    "DecisionBundleRow",
     "EventRow",
     "InstrumentRow",
     "InstrumentVersionRow",

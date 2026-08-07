@@ -34,6 +34,7 @@ __all__ = ["IdKind", "derive_id", "short_id"]
 class IdKind(StrEnum):
     """Namespace for a derived identifier."""
 
+    CYCLE = "cycle"
     SNAPSHOT = "snapshot"
     SNAPSHOT_MEMBER = "snapshot_member"
     EVIDENCE = "evidence"
