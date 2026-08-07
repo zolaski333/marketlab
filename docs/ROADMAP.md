@@ -229,7 +229,7 @@ Each is deliberate; none is silent.
 | §8.1 | One adapter per provider protocol | One `SyntheticMarketDataProvider` implementing all five protocols | Honest for a *synthetic* world: a fabricated script can coherently derive news, prices and corporate actions from one source of truth. Real Phase 3 adapters will not share this shape — each gets its own adapter for its own source. See the `marketlab.ingestion.synthetic` docstring. |
 | §7.1 | `InstrumentVersion` carries an explicit validity period | No stored `effective_to` column | Storing one would mean mutating the previous version's row the moment a new one is written — exactly the in-place edit append-only storage forbids. "Current as of a cutoff" is instead computed as the latest version whose `effective_from` does not exceed it. See the `marketlab.instruments.repository` docstring. |
 | §8.1 | Five raw record kinds, each with its own shape | One uniform `Evidence` type (`kind` + `subject_ids` + `fields`) in the retrieval layer | The raw ingestion types (`RawPriceBar`, `RawNewsItem`, ...) stay precisely typed; only the frozen, agent-facing view collapses them into one searchable, citable shape, the same way a real search index does not keep five parallel collections. See the `marketlab.retrieval.types` docstring. |
-| §13 | Arms A/B/C/D plus placebos B′/C′ | The four arms encoded as a **crossed 2×2** of `(memory, reflection)` grants — A neither, B memory, C both, D reflection only — with B′/C′ as matched placebos of B and C | The specification names the six conditions; what each one *grants* is this implementation's reading of them. A crossed design is the only arrangement of four arms that separates the memory and reflection effects instead of confounding them, and it makes exactly two placebos the right number. Recorded as an open question below; `marketlab.experiments.arms.ARMS` is the single table to change if the study owner intends a different mapping. |
+| §13 | Arms A/B/C/D plus placebos B′/C′ | The four arms encoded as a **crossed 2×2** of `(memory, reflection)` grants — A neither, B memory, C both, D reflection only — with B′/C′ as matched placebos of B and C | The specification names the six conditions; what each one *grants* is this implementation's reading, **decided and closed** rather than left open. A crossed design is the only arrangement of four arms that separates the memory and reflection effects instead of confounding them: without D, a C-versus-A difference cannot be attributed to either factor. D is coherent because the two channels are defined as separable — memory is raw episodic recall, reflection is distilled strategy produced by a process that reads the run's record. Under D the *reflection process* reads history; the agent does not. See `marketlab.experiments.arms.Channel`. |
 | §13.4 | Randomised arm order | A deterministic Fisher-Yates over an explicit SHA-256 key stream, not `random.shuffle` | `random.Random` guarantees reproducibility of `random()` for a seed, but `shuffle`/`sample` are implementation details that have changed between CPython versions. A replay may run years after collection, on a different interpreter. See the `marketlab.experiments.ordering` docstring. |
 | §12.1 | A provider's own tool-calling wire format | A custom, provider-independent request/response loop (`ModelRequest`/`ModelResponse`/`ToolCallRequest`/`ToolCallResult`) | Mirroring one real provider's exact shape would make that provider's quirks look like part of the platform's core contract. `marketlab.agents.decision.DecisionAgent` drives this loop generically; a real Phase 3 adapter translates to and from its provider's own format at the edge. See the `marketlab.models.types` docstring. |
 
@@ -254,19 +254,13 @@ Each is deliberate; none is silent.
    to enforce, not because 20 is scientifically motivated. Real values should
    come out of task #4's API cost model together with the decision cadence
    (open question 2), since both drive the same per-cycle cost budget.
-5. **What each arm grants (§13).** `marketlab.experiments.arms` encodes A/B/C/D
-   as a crossed 2×2 of memory × reflection, with D as reflection-without-memory
-   — see the departures table. Confirm this is the intended design, and in
-   particular confirm that D is a condition the study wants at all: an agent
-   reflecting on strategy with no persistent memory to reflect *over* is a
-   coherent cell of the design but an unusual thing to build in practice.
-6. **Repetitions per arm.** `RunConfig.repetitions` defaults to 1. The right
+5. **Repetitions per arm.** `RunConfig.repetitions` defaults to 1. The right
    value depends on within-condition variance, which nothing has measured yet
    — it is one of the quantities task #4's power simulation exists to
    estimate. Independent repetitions are what separate "this arm decides
    differently" from "this model is nondeterministic", so 1 is a placeholder,
    not a recommendation.
-7. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
+6. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
    treats a snapshot as `DEGRADED`/`INVALID` based on missing *price* data for
    actively-tradable instruments only, and treats missing news/macro/FX as
    normal rather than degrading. If the specification intends a stricter or

@@ -47,10 +47,36 @@ __all__ = [
     "DEFAULT_ARMS",
     "ArmId",
     "ArmSpec",
+    "Channel",
     "MaterialGrant",
     "is_matched_placebo",
     "spec_for",
 ]
+
+
+class Channel(StrEnum):
+    """The two things a condition may grant, defined so that they are
+    genuinely separable rather than nested.
+
+    ``MEMORY``
+        *Raw episodic recall.* Past decisions, what happened to them, and the
+        evidence they cited — retrieved under the same point-in-time rule as
+        everything else. What the agent gets is history.
+
+    ``REFLECTION``
+        *Distilled strategy.* Rules and hypotheses produced periodically by a
+        process that reads the run's own record. What the agent gets is a
+        conclusion, not the material it was drawn from.
+
+    This is what makes arm D (reflection without memory) coherent rather than
+    paradoxical: the *reflection process* reads history, the agent under arm D
+    does not. D receives the distillate with no ability to recall the
+    underlying episodes — which is precisely the cell that separates "having
+    been told what works" from "being able to look up what happened".
+    """
+
+    MEMORY = "MEMORY"
+    REFLECTION = "REFLECTION"
 
 
 class MaterialGrant(StrEnum):
@@ -145,8 +171,10 @@ _ARMS: Final[dict[ArmId, ArmSpec]] = {
         reflection=MaterialGrant.GENUINE,
         placebo_of=None,
         rationale=(
-            "Reflection without persistent memory. Completes the 2x2 so that the "
-            "memory and reflection effects can be separated instead of confounded."
+            "Reflection without persistent memory: the agent is handed the "
+            "distilled strategy but cannot recall the episodes it was drawn from. "
+            "Completes the 2x2, without which a C-versus-A difference cannot be "
+            "attributed to either factor. See Channel for why this is coherent."
         ),
     ),
     ArmId.B_PRIME: ArmSpec(
