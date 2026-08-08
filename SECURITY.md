@@ -24,6 +24,11 @@ There is no bounty and no guaranteed response time. This is a research project.
 
 ## Threat model
 
+**The full version is [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)**, which
+ranks the adversaries honestly — the top one is the authors, not an intruder —
+and states the residual risk left by each defence. What follows is the short
+version.
+
 Three things in this platform are security-relevant, and each is defended
 structurally rather than by convention.
 

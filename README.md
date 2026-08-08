@@ -37,15 +37,16 @@ Connecting a real model is Phase 3. Until then,
 
 ## Status
 
-**Phase 1 complete**: a synthetic vertical slice that runs end to end.
-877 tests, `mypy --strict` clean, five quality gates enforced in CI on Linux and
-Windows.
+**Phase 0 and Phase 1 complete**: a synthetic vertical slice that runs end to
+end. 1 047 tests, `mypy --strict` clean, five quality gates enforced in CI on
+Linux and Windows.
 
-Still open before a real study: a real provider adapter, a real data adapter,
-and architecture decision records (task #5). The power simulation and cost
-model are done — see [docs/POWER.md](docs/POWER.md) — so the primary metric,
-the ROPE and the study duration are now decisions waiting on judgement rather
-than on missing evidence.
+Still open before a real study: **a real provider adapter and a real data
+adapter**. Everything else Phase 0 and Phase 1 asked for is done — the power
+simulation and cost model ([docs/POWER.md](docs/POWER.md)), and the
+architecture, protocol and decision records ([docs/](docs/)). So the primary
+metric, the ROPE and the study duration are now decisions waiting on judgement
+rather than on missing evidence.
 
 ## How the design works
 
@@ -146,17 +147,30 @@ workflow — because the predecessor's validation report claimed gates that were
 never installed, and nothing in that repository could contradict it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions that are not
-negotiable, and [SECURITY.md](SECURITY.md) for the threat model, including the
-prompt-injection fixture the synthetic world scripts deliberately.
+negotiable, [SECURITY.md](SECURITY.md) for how to report a vulnerability, and
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for what could make a published
+claim false — including the prompt-injection fixture the synthetic world
+scripts deliberately.
 
 ## Documentation
+
+Start with the roadmap if you want to know what is real, and with the
+limitations if you want to know what a result here could mean.
 
 | Document | What it is for |
 |---|---|
 | [docs/ROADMAP.md](docs/ROADMAP.md) | **The only place completeness is claimed.** Every `done` row names the test that substantiates it; every gap is stated explicitly. |
+| [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What this study **cannot** conclude, in one place. Written so a reviewer does not find it first. |
 | [docs/PRE_REGISTRATION.md](docs/PRE_REGISTRATION.md) | The study's design, fixed in advance. A complete frame; the remaining decisions are marked open. |
-| [docs/POWER.md](docs/POWER.md) | Power curves, effective sample size and API cost, produced by running the real analysis pipeline over simulated worlds. The numbers behind the design decisions. |
-| [docs/adr/](docs/adr/) | Architecture decision records. Empty, and the README there says why. |
+| [docs/SCIENTIFIC_PROTOCOL.md](docs/SCIENTIFIC_PROTOCOL.md) | The method: the design, what is held identical, where masking stops, the trajectory confound, and the analysis plan. |
+| [docs/POWER.md](docs/POWER.md) | Power curves, effective sample size and API cost, produced by running the real analysis pipeline over simulated worlds. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the code is arranged, and which arrangements are load-bearing. |
+| [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Every table and column, checked against the live schema in both directions. |
+| [docs/FAILURE_POLICY.md](docs/FAILURE_POLICY.md) | What happens when something goes wrong, decided in advance. Every failure kind, rejection reason and exit code. |
+| [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) | How to reproduce a run, an analysis and the power figures — and where the guarantee stops. |
+| [docs/PROVIDER_POLICY.md](docs/PROVIDER_POLICY.md) | The contract a real model adapter must meet, written before one exists. |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | What could make a published claim false. The top-ranked adversary is the authors. |
+| [docs/adr/](docs/adr/) | Seventeen architecture decision records: what was rejected, what it would have cost, and what would make us revisit it. |
 
 ## Licence
 

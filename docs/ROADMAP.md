@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 877 tests passing, `mypy --strict` clean on 88 source files —
+Last verified: 1 047 tests passing, `mypy --strict` clean on 88 source files —
 including from a **fresh clone** with `uv sync --all-extras --frozen`, which is
 what a stranger actually does.
 Run automatically on every push and pull request, on Linux and Windows, by
@@ -67,7 +67,7 @@ never installed; that specific claim is now one a machine can contradict.
 | Import lint forbidding raw session access in agent paths | `done` | `tests/security/test_decision_path_isolation.py` |
 | Power simulation and API cost model (§21, §29.5) | `done` | `tests/unit/test_power.py`, `docs/POWER.md` |
 | Provider token usage recorded per elicitation | `done` | `tests/unit/test_power.py`; columns on `decision_bundles` and `panel_bundles` |
-| Architecture docs and ADRs | `partial` | this file; module docstrings carry the reasoning. `docs/adr/` is still empty — task #5 |
+| Architecture docs and ADRs (§5) | `done` | `tests/test_documentation.py`; `docs/ARCHITECTURE.md`, `SCIENTIFIC_PROTOCOL.md`, `DATA_DICTIONARY.md`, `THREAT_MODEL.md`, `FAILURE_POLICY.md`, `PROVIDER_POLICY.md`, `REPRODUCIBILITY.md`, `LIMITATIONS.md`, and 17 records in `docs/adr/` |
 
 ### Known gaps in what is marked `done`
 
@@ -91,6 +91,23 @@ never installed; that specific claim is now one a machine can contradict.
   rather than deriving. Open question 7 is narrowed, not closed: the numbers
   now say what a given effect size buys, but not which recall depth produces
   which effect size.
+- **The documents are checked for drift, not for truth.**
+  `tests/test_documentation.py` derives the data dictionary's coverage from
+  `Base.metadata` in both directions, matches the failure policy against every
+  member of five enums and both halves of the exit code table, and requires
+  every ADR to carry its five sections and be indexed. It cannot tell whether a
+  column is described *correctly* — a dictionary can name every column and get
+  each one wrong. That remains review's job, and the distinction is stated in
+  the test's own docstring so nobody mistakes a green suite for an accurate
+  document.
+- **The ADRs were written retrospectively, at task #5.** Every decision they
+  record was already implemented. A retrospective record can rationalise
+  whatever was built, listing as "options considered" only those that make the
+  built thing look inevitable. Two things limit that and neither eliminates it:
+  each record names the module or test implementing it, so it can be checked
+  against the code rather than the author's memory, and each is required to
+  state a cost rather than only a benefit. `docs/adr/README.md` says so on its
+  first screen.
 - **No Alembic migration exists.** `create_schema()` builds the schema directly.
   Migrations become necessary only once a study is live and the schema changes;
   `Database.migration_mode()` is the audited window they will run in.
@@ -436,14 +453,16 @@ never installed; that specific claim is now one a machine can contradict.
   invoked — not that CI is green.** A workflow file can exist and every run of
   it can fail. The badge for that is GitHub's, not this repository's, and this
   file does not claim it.
-- **CI has never run on GitHub.** `origin/main` does not exist; nothing has
-  ever been pushed. The workflow's exact command sequence has been executed
-  twice locally on Windows — once in the working tree and once in a fresh
-  `git clone` with `uv sync --frozen`, which is the stronger check — but the
-  Linux leg of the matrix remains untested in practice. `.gitattributes` now
-  forces LF so that the formatting gate cannot differ between the two, which
-  was the most likely way that first run would have failed. The first push is
-  where the claim becomes real.
+- **This repository does not claim CI is green.** `origin/main` now exists, so
+  the workflow fires on every push, and the workflow's exact command sequence
+  has also been executed locally on Windows twice — once in the working tree
+  and once in a fresh `git clone` with `uv sync --frozen`, which is the stronger
+  check. `.gitattributes` forces LF so the formatting gate cannot differ
+  between the two operating systems, which was the most likely way the Linux
+  leg would have failed. **Whether any given run passed is visible on GitHub's
+  Actions tab and is deliberately not asserted here** — a workflow file can
+  exist and every run of it can fail, and no file inside a repository can
+  honestly report on runs outside it.
 - **There is no coverage threshold.** `pytest-cov` is installed and unused. A
   percentage target tends to be met by testing what is easy rather than what
   is load-bearing, and this suite's guards — condition isolation, the

@@ -71,12 +71,35 @@ No field, no parameter, no string. `tests/security/test_condition_isolation.py`
 inspects real requests from a real cycle. A condition may be *granted*
 different material; it may never be *told* which condition it is.
 
+### 7. A committing scientific decision gets a record, not a docstring
+
+If a change fixes what the study *measures* — the design, the metric, the
+resolution convention, the analysis, what counts as a failure — it needs a file
+in `docs/adr/`. A docstring records the decision that was taken; it does not
+record what was **rejected**, what that would have cost, or what would make us
+revisit it, and those are the parts a reader arriving in a year cannot
+reconstruct.
+
+Copy the shape of any existing record. `tests/test_documentation.py` requires
+the five sections, an `**Implemented by:**` line, and an entry in the index.
+Two conventions it cannot check but that matter as much:
+
+- **Consequences must state a cost.** A record whose consequences are all
+  favourable has not been thought about.
+- **Do not renumber and do not delete.** A decision that turns out wrong is
+  superseded by a new record saying so; the old file stays, as evidence that
+  the question was once live.
+
 ## Style
 
 - Docstrings explain **why**, not what. The what is in the code below them.
 - When a choice departs from the specification, record it in the
   "Decisions taken that depart from the specification" table in the roadmap,
   with the reason.
+- When you change the schema, a failure kind, an exit code or an arm, the
+  matching document changes in the same commit. `tests/test_documentation.py`
+  will make you, which is the point — but it checks that a thing is *described*,
+  never that the description is right. That part is review.
 - When a value is a placeholder rather than a motivated choice, say so where it
   is defined *and* in the roadmap's open questions. There are ten of those
   right now; adding an eleventh is better than quietly pretending a round
