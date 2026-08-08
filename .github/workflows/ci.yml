@@ -65,14 +65,17 @@ jobs:
       - name: pytest
         run: uv run pytest -q
 
+      # Written under data/, which .gitignore already excludes: someone running
+      # these commands locally must not end up with a study database staged.
+      #
       # The command line is a deliverable, so it is exercised as one: a study
       # is run, resolved, analysed, verified and replayed end to end. The
       # replay exits non-zero on any divergence, which makes this step a real
       # reproducibility check rather than a smoke test.
       - name: end-to-end study through the CLI
         run: |
-          uv run marketlab run --config configs/synthetic-pilot.yaml --db ci/study.db --sessions 8
-          uv run marketlab resolve --run-id SYNTHETIC_PILOT --db ci/study.db
-          uv run marketlab analyse --run-id SYNTHETIC_PILOT --db ci/study.db --rope-lower -0.01 --rope-upper 0.01 --resamples 500
-          uv run marketlab verify --db ci/study.db
-          uv run marketlab replay --run-id SYNTHETIC_PILOT --db ci/study.db
+          uv run marketlab run --config configs/synthetic-pilot.yaml --db data/ci-study.db --sessions 8
+          uv run marketlab resolve --run-id SYNTHETIC_PILOT --db data/ci-study.db
+          uv run marketlab analyse --run-id SYNTHETIC_PILOT --db data/ci-study.db --rope-lower -0.01 --rope-upper 0.01 --resamples 500
+          uv run marketlab verify --db data/ci-study.db
+          uv run marketlab replay --run-id SYNTHETIC_PILOT --db data/ci-study.db

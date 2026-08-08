@@ -36,7 +36,9 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 816 tests passing, `mypy --strict` clean on 84 source files.
+Last verified: 844 tests passing, `mypy --strict` clean on 84 source files —
+including from a **fresh clone** with `uv sync --all-extras --frozen`, which is
+what a stranger actually does.
 Run automatically on every push and pull request, on Linux and Windows, by
 `.github/workflows/ci.yml` — and `tests/test_quality_gates.py` checks that the
 tools are declared, are executable in the running interpreter, and are actually
@@ -416,16 +418,33 @@ never installed; that specific claim is now one a machine can contradict.
   invoked — not that CI is green.** A workflow file can exist and every run of
   it can fail. The badge for that is GitHub's, not this repository's, and this
   file does not claim it.
-- **CI has never run.** The workflow is committed and its command sequence was
-  executed locally end to end on Windows, but no push has exercised it on
-  GitHub, and the Linux leg of the matrix is untested in practice. The first
-  push is where that claim becomes real.
+- **CI has never run on GitHub.** `origin/main` does not exist; nothing has
+  ever been pushed. The workflow's exact command sequence has been executed
+  twice locally on Windows — once in the working tree and once in a fresh
+  `git clone` with `uv sync --frozen`, which is the stronger check — but the
+  Linux leg of the matrix remains untested in practice. `.gitattributes` now
+  forces LF so that the formatting gate cannot differ between the two, which
+  was the most likely way that first run would have failed. The first push is
+  where the claim becomes real.
 - **There is no coverage threshold.** `pytest-cov` is installed and unused. A
   percentage target tends to be met by testing what is easy rather than what
   is load-bearing, and this suite's guards — condition isolation, the
   append-only triggers, the replay, the taxonomy scan — are chosen for what
   they would catch rather than for what they touch. Worth revisiting if the
   suite ever stops being read.
+- **Publication-readiness is checked, not assumed.**
+  `tests/test_release_readiness.py` verifies that the LICENSE matches the
+  declared metadata, that every README link resolves, that the README carries
+  the "no real money" and "no result here is about memory yet" statements, and
+  that the pre-registration's status banner agrees with how many of its
+  decisions are still open. It does **not** check that the documentation is
+  good — only that specific load-bearing statements are present and mutually
+  consistent.
+- **The pre-registration is a frame, not a pre-registration.**
+  `docs/PRE_REGISTRATION.md` is complete in structure and marked *not yet
+  binding*: six decisions are still open, three of which wait on task #4. It
+  becomes a real pre-registration when those are filled in a signed, tagged
+  commit made **before** the first confirmatory run.
 - **Structured logs are per-command records, not a log stream.** `--json`
   emits one canonical JSON object per result on stdout; there is no
   correlation id, no severity, and no timestamp on each line. Enough for
