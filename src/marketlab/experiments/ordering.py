@@ -32,23 +32,20 @@ seed, but the *algorithms built on it* — ``shuffle``, ``sample`` — are
 implementation details that have changed between CPython versions before.
 Reproducibility here has to survive an interpreter upgrade years after the
 data was collected, so the shuffle is a Fisher-Yates over an explicit SHA-256
-key stream with rejection sampling: a fixed, written-down construction that
-depends on nothing but the hash function.
+key stream with rejection sampling — see :class:`marketlab.core.rng.DeterministicRng`,
+which is the one written-down construction the block bootstrap (§21.4) draws
+from as well.
 """
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from enum import StrEnum
-from typing import Final
 
 from marketlab.core.failures import ConfigurationError
+from marketlab.core.rng import DeterministicRng
 
 __all__ = ["OrderPolicy", "execution_order"]
-
-_WORD_BYTES: Final = 4
-_WORD_MAX: Final = 1 << (8 * _WORD_BYTES)
 
 
 class OrderPolicy(StrEnum):
@@ -90,37 +87,4 @@ def execution_order[T](
         count = len(units)
         return tuple(units[(position + cycle_index) % count] for position in range(count))
 
-    stream = _key_stream(f"{seed}|cycle={cycle_index}")
-    shuffled = list(units)
-    for index in range(len(shuffled) - 1, 0, -1):
-        swap_with = _uniform_below(stream, index + 1)
-        shuffled[index], shuffled[swap_with] = shuffled[swap_with], shuffled[index]
-    return tuple(shuffled)
-
-
-def _key_stream(seed_material: str) -> Iterator[int]:
-    """Yield an endless deterministic byte stream derived from ``seed_material``."""
-    counter = 0
-    while True:
-        block = hashlib.sha256(f"{seed_material}#{counter}".encode()).digest()
-        yield from block
-        counter += 1
-
-
-def _uniform_below(stream: Iterator[int], bound: int) -> int:
-    """Draw uniformly from ``range(bound)``.
-
-    Rejection sampling rather than a plain modulo: taking ``value % bound``
-    over the full 32-bit range biases the low indices whenever ``bound`` does
-    not divide 2**32, which for six arms would tilt the shuffle towards a
-    particular ordering in a way nobody would notice by reading the output.
-    """
-    if bound <= 1:
-        return 0
-    limit = (_WORD_MAX // bound) * bound
-    while True:
-        value = 0
-        for _ in range(_WORD_BYTES):
-            value = (value << 8) | next(stream)
-        if value < limit:
-            return value % bound
+    return DeterministicRng(f"{seed}|cycle={cycle_index}").shuffled(units)
