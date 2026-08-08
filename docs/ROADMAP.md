@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 844 tests passing, `mypy --strict` clean on 84 source files —
+Last verified: 877 tests passing, `mypy --strict` clean on 88 source files —
 including from a **fresh clone** with `uv sync --all-extras --frozen`, which is
 what a stranger actually does.
 Run automatically on every push and pull request, on Linux and Windows, by
@@ -65,7 +65,8 @@ never installed; that specific claim is now one a machine can contradict.
 | Manual intervention audit (§P6) | `done` | `tests/unit/test_interventions.py` |
 | Point-in-time cutoff, structurally required (§6.3) | `done` | `tests/unit/test_cutoff.py` |
 | Import lint forbidding raw session access in agent paths | `done` | `tests/security/test_decision_path_isolation.py` |
-| **Power simulation and API cost model** | `not started` | — |
+| Power simulation and API cost model (§21, §29.5) | `done` | `tests/unit/test_power.py`, `docs/POWER.md` |
+| Provider token usage recorded per elicitation | `done` | `tests/unit/test_power.py`; columns on `decision_bundles` and `panel_bundles` |
 | Architecture docs and ADRs | `partial` | this file; module docstrings carry the reasoning. `docs/adr/` is still empty — task #5 |
 
 ### Known gaps in what is marked `done`
@@ -73,6 +74,23 @@ never installed; that specific claim is now one a machine can contradict.
 - **`FailureScope` / `ObservedAgentFailure` are types without call sites.** They
   are the contract the execution and model layers will be held to; nothing
   enforces them yet.
+- **Every cost figure is `ASSUMED`, not measured.** `TokenUsage` is now
+  recorded on every decision and panel bundle, and `measure_profile` refuses to
+  build a profile from a run that reported nothing — which is exactly what a
+  run against the deterministic fake reports. Until a pilot runs against a real
+  provider, `docs/POWER.md`'s money is arithmetic on a written-down guess, and
+  every line of the CLI output says `basis: ASSUMED`.
+- **The power simulation assumes a world in which skill is expressible.** It
+  models arms recovering fractions of a real edge. If a real model's forecasts
+  turn out to cluster within a couple of points of 0.5 whatever it is granted,
+  every effect size in `docs/POWER.md` is optimistic and every duration is an
+  underestimate. The pilot must report the observed spread of forecast
+  probabilities before any of those durations is relied on.
+- **Recall depth and reflection cadence are untouched by the simulation.** They
+  determine the *true* effect size, which the simulation takes as a parameter
+  rather than deriving. Open question 7 is narrowed, not closed: the numbers
+  now say what a given effect size buys, but not which recall depth produces
+  which effect size.
 - **No Alembic migration exists.** `create_schema()` builds the schema directly.
   Migrations become necessary only once a study is live and the schema changes;
   `Database.migration_mode()` is the audited window they will run in.
@@ -487,42 +505,49 @@ Each is deliberate; none is silent.
 
 ## Open questions for the study owner
 
-1. **Primary metric.** Deferred until the power simulation lands. Brier score on
-   5-session direction has a dynamic range of roughly 0.005 and a small
-   effective sample size once overlapping horizons and cross-sectional
-   correlation are accounted for. Candidates to compare on power: Brier at 1 /
-   5 / 20 sessions, decision stability under identical bundles, and evidential
-   fidelity.
+1. **Primary metric.** The simulation has run; see `docs/POWER.md`. It finds
+   Brier at **5 sessions** viable (80% power at 60 sessions, 94% at 120),
+   Brier at 20 more powerful still, and Brier at **1 session not viable at
+   all** — its effect lies inside a ±0.005 ROPE and power never exceeds 0.07
+   at any duration tested. Decision stability is implemented and runs through
+   the same pipeline but cannot be powered without a pilot's reporting-noise
+   estimate; evidential fidelity cannot be simulated from a forecast-skill
+   model at all, and saying so is the honest limit. **The choice itself
+   remains the study owner's** and belongs in the pre-registration.
 2. **Decision cadence.** Not fixed by the specification. It drives power, cost
    and calendar handling, so it must be pinned before the execution engine is
    finalised. Working assumption: decide at close of session *t*, execute at the
    open of *t+1*.
-3. **Equivalence bounds.** §21.7 requires "no practically useful effect" to be a
-   reachable conclusion. That requires a pre-registered ROPE, and none is
-   defined yet. As of task 12 this is enforced rather than merely noted:
-   `marketlab.analysis.plan.AnalysisPlan` has no default `rope` and cannot be
-   constructed without one, so no analysis can be run until the study owner
-   fixes the band. A ROPE on the Brier scale is not intuitive — 0.01 is a
-   large effect there — so the number should come out of the power simulation
-   (task #4) alongside the primary metric.
-4. **Tool budget magnitudes.** `ToolBudget`'s defaults (20 calls, 20,000
-   evidence characters per decision) are round-number placeholders, not a
-   pre-registered decision — they exist so the budget mechanism has something
-   to enforce, not because 20 is scientifically motivated. Real values should
-   come out of task #4's API cost model together with the decision cadence
-   (open question 2), since both drive the same per-cycle cost budget.
+3. **Equivalence bounds.** Still the study owner's to fix, and still enforced:
+   `AnalysisPlan` has no default `rope` and cannot be constructed without one.
+   What has changed is that the choice is now informed. `docs/POWER.md` gives
+   the translation the decision needs: at horizon 5 the effect scales at about
+   **0.07 Brier points per unit of recovered signal**, so a ±0.005 band
+   declares negligible any arm recovering less than about 7 points more of the
+   available edge. That band also happens to exclude the horizon-1 effect and
+   admit the horizon-5 one, which is coherent — but coherence is not the same
+   as being right, and the number is a scientific judgement.
+4. **Tool budget magnitudes.** Still placeholders, but the cost model has
+   removed the reason to worry about them: a full 120-session, six-arm study
+   costs $12 to $390 depending on the price tier, so budgets are not
+   cost-constrained. `docs/POWER.md` also finds that the expensive dimension
+   is the **turn count**, not the evidence cap — every accumulated tool result
+   is resent on every later turn, so input grows with roughly the square of
+   the turns while generated tokens (~40% of the bill) cannot be cached at
+   all. Cutting the evidence budget saves less than it looks.
 5. **Starting capital and target weight.** The integration test funds
    1,000,000 USD + 500,000 EUR per condition at a 5% target weight, and the
    unit tests use 100,000 at 10%. Neither is pre-registered. The figures
    interact with the fee minimum (which makes small orders uneconomic) and
    with the participation cap, so they should be fixed once alongside the
    decision cadence (question 2).
-6. **Repetitions per arm.** `RunConfig.repetitions` defaults to 1. The right
-   value depends on within-condition variance, which nothing has measured yet
-   — it is one of the quantities task #4's power simulation exists to
-   estimate. Independent repetitions are what separate "this arm decides
-   differently" from "this model is nondeterministic", so 1 is a placeholder,
-   not a recommendation.
+6. **Repetitions per arm.** One is sufficient for the accuracy metrics: the
+   simulation reaches 80–94% power at horizon 5 with a single repetition.
+   Two or more become necessary only if **decision stability** is promoted to
+   a primary metric, since dispersion across repetitions is undefined from a
+   single draw — `pair_scores` refuses it rather than reporting a perfect tie.
+   The remaining unknown is within-condition variance under a real provider,
+   which no simulation can supply.
 7. **Recall depth and reflection cadence.** Eight episodes recalled, one
    reflection every five cycles. Both are round numbers. Deeper recall and more
    frequent reflection are a *stronger* treatment, so these choices set the

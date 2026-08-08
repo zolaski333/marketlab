@@ -1,13 +1,17 @@
 # Pre-registration
 
 > **Status: not yet binding.** This document is complete in structure and
-> incomplete in content. Six decisions marked **OPEN** below must be made
-> before any run counts as confirmatory, and three of them cannot be made
-> without the power simulation (task #4 in [ROADMAP.md](ROADMAP.md)).
+> incomplete in content. The decisions marked **OPEN** below must be made
+> before any run counts as confirmatory.
+>
+> The power simulation that several of them waited on has now run — see
+> [POWER.md](POWER.md) — so what remains is judgement, not missing evidence.
+> The two that still have no evidence behind them and cannot get any from a
+> simulation are the **model** and the **recall depth**: both need a pilot.
 >
 > Publishing it in this state is the point. A pre-registration written after
-> the data exist is not one, so the honest sequence is to publish the empty
-> frame first, fill it in a signed commit, and only then run.
+> the data exist is not one, so the honest sequence is to publish the frame
+> first, fill it in a signed commit, and only then run.
 
 ## 1. Question
 
@@ -49,32 +53,43 @@ that provider drift within a cycle cannot be confounded with the condition.
 
 ## 3. Primary outcome
 
-**OPEN — requires task #4.**
+**OPEN — the evidence is in; the choice is not made.**
 
-Candidates, to be compared on power before one is chosen:
+The power simulation has now run — see [POWER.md](POWER.md) — so this is a
+choice to be *made* rather than deferred. What it found:
 
-- Brier score on the imposed panel at 1, 5 or 20 sessions.
-- Decision stability under identical bundles.
-- Evidential fidelity (citation validity rates).
+| candidate | power at 120 sessions | verdict |
+|---|---:|---|
+| Brier @ 5 sessions | 0.94 | viable; recommended |
+| Brier @ 20 sessions | 1.00 | viable; slow to resolve |
+| Brier @ 1 session | 0.05 | **not viable** — effect falls inside the ROPE |
+| Decision stability | — | implemented, needs a pilot to power |
+| Evidential fidelity | — | not simulatable from a forecast-skill model |
 
-Brier is currently the implemented default and is strictly proper. Its dynamic
-range on 5-session direction is roughly 0.005, and the effective sample size is
-smaller than it looks once overlapping horizons and cross-sectional correlation
-are accounted for. That is precisely why the choice waits for a power
-simulation rather than being asserted here.
+Brier is strictly proper, which is why it is the implemented default: a
+forecaster minimises its expected score only by reporting its true belief.
+
+**Still OPEN**: which of these is written here as *the* primary. The others
+become secondary and are reported without confirmatory weight.
 
 Secondary outcomes, reported but not confirmatory: calibration tables per arm,
 observed agent-failure rates by kind, portfolio equity paths.
 
 ## 4. Region of practical equivalence
 
-**OPEN — requires task #4.**
+**OPEN — but now informed.**
 
 §21.7 requires "no practically useful effect" to be a reachable conclusion,
 which requires a band around zero inside which a real difference is too small
-to matter. On the Brier scale this is not intuitive — 0.01 is a large effect —
-so the number must come out of the power simulation alongside the primary
-metric.
+to matter. On the Brier scale this is not intuitive, which is what the
+simulation was for: at horizon 5 the effect scales at roughly **0.07 Brier
+points per unit of recovered signal**, so a ±0.005 band treats as negligible
+any arm that recovers less than about 7 points more of the available edge.
+
+Reaching an `EQUIVALENT` verdict also costs duration: under the null it is
+returned 23% of the time at 60 sessions and 83% at 180. If a credible null
+result is a goal — and it should be — the study is longer than power against
+an effect alone would require.
 
 This is **enforced, not merely intended**: `marketlab.analysis.plan.AnalysisPlan`
 has no default ROPE and cannot be constructed without one. No analysis can be
@@ -113,8 +128,8 @@ the run, and the configuration is then immutable (see §8):
 |---|---|
 | Model and version | **OPEN** — must be recorded exactly, including the sampling temperature |
 | Decision cadence | **OPEN** — working assumption: decide at close of session *t*, execute at the next eligible window |
-| Number of sessions | **OPEN** — a power question |
-| Repetitions per arm | **OPEN** — depends on within-condition variance, which nothing has measured |
+| Number of sessions | **OPEN** — 60 for 80% power at horizon 5; 120-180 to be able to conclude equivalence ([POWER.md](POWER.md)) |
+| Repetitions per arm | **OPEN** — 1 suffices for accuracy; 2+ only if stability is made primary |
 | Tool budget, evidence cap, turn cap | placeholders (20 calls / 20 000 chars / 6 turns) |
 | Recall depth, reflection cadence | placeholders (8 episodes, every 5 cycles) |
 | Starting capital, target weight | placeholders (1 000 000 USD + 500 000 EUR, 5%) |
@@ -177,3 +192,14 @@ decisions before the confirmatory run is worth paying for. The repository ships
 a test double that reads its context and produces different decisions per arm
 through the identical pipeline, so the *channel* is known to be live; whether a
 given real model uses it is an empirical question the pilot has to answer.
+
+The power simulation sharpens what the pilot must report. It assumes arms
+recover fractions of a genuine edge; if a real model's probabilities cluster
+within a couple of points of 0.5 whatever it is granted, there is no skill to
+differentiate and every duration in [POWER.md](POWER.md) is an underestimate.
+**The pilot must therefore report the observed spread of forecast
+probabilities**, not only whether the decisions differ.
+
+Cost is not among the risks. A full 120-session, six-arm study projects at $12
+to $390 depending on price tier, so the design should be chosen on power and
+validity and not on price.

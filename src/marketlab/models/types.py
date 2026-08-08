@@ -29,7 +29,7 @@ adapter later without change.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
@@ -40,6 +40,7 @@ __all__ = [
     "RawDecision",
     "RawForecast",
     "RawTradeIntent",
+    "TokenUsage",
     "ToolCallRequest",
     "ToolCallResult",
     "ToolSchema",
@@ -155,6 +156,48 @@ class ModelRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class TokenUsage:
+    """What one model turn cost, as the provider reported it.
+
+    Measured, never estimated. A provider that reports nothing leaves this at
+    zero and :attr:`is_measured` says so, because a cost model built on
+    silently-assumed token counts is a guess wearing a number's clothes — and
+    the whole point of recording usage is to replace the guesses in
+    :mod:`marketlab.power.cost` with observations.
+
+    ``cached_input_tokens`` is counted separately rather than folded into
+    ``input_tokens`` because it is usually billed at a different rate, and in
+    this platform it is the *dominant* term: :class:`~marketlab.agents.decision.DecisionAgent`
+    resends every accumulated tool result on every turn, so the stable prefix
+    is exactly what a provider-side cache is for.
+    """
+
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: TokenUsage) -> TokenUsage:
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            cached_input_tokens=self.cached_input_tokens + other.cached_input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+        )
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.cached_input_tokens + self.output_tokens
+
+    @property
+    def is_measured(self) -> bool:
+        """Whether a provider reported anything at all.
+
+        Distinct from "the call was free": an unmeasured call and a zero-token
+        call are different facts, and a cost model must not average over both.
+        """
+        return self.total_tokens > 0
+
+
+@dataclass(frozen=True, slots=True)
 class ModelResponse:
     """One turn's response. At most one of ``tool_calls`` / ``decision`` is
     meaningful at a time; :mod:`marketlab.agents.decision` treats a response
@@ -164,6 +207,9 @@ class ModelResponse:
     decision: RawDecision | None = None
     refused: bool = False
     refusal_reason: str = ""
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    """What this turn cost. Left at zero by the deterministic fake, which costs
+    nothing; populated by a real provider adapter from its own response."""
 
 
 @runtime_checkable

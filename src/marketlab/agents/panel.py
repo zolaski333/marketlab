@@ -27,14 +27,14 @@ here to count.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from marketlab.agents.decision import TOOL_CATALOGUE, ConditionContext, DecisionAgent
 from marketlab.core.failures import AgentFailureKind, ObservedAgentFailure
 from marketlab.core.instants import Instant
 from marketlab.forecasting.panel import PanelItem
-from marketlab.models.types import LanguageModel
+from marketlab.models.types import LanguageModel, TokenUsage
 from marketlab.retrieval.tools import RetrievalToolkit
 
 __all__ = ["PANEL_SYSTEM_PROMPT", "PanelAgent", "PanelAnswer", "PanelOutcome"]
@@ -69,6 +69,7 @@ class PanelOutcome:
     failures: tuple[ObservedAgentFailure, ...]
     tool_calls_made: int
     model_turns: int
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
     def answer_for(self, item: PanelItem) -> PanelAnswer | None:
         for answer in self.answers:
@@ -159,4 +160,5 @@ class PanelAgent:
             failures=tuple(failures),
             tool_calls_made=outcome.tool_calls_made,
             model_turns=outcome.model_turns,
+            usage=outcome.usage,
         )

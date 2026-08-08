@@ -33,6 +33,7 @@ that a failure cannot be mistaken for a success.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -45,8 +46,13 @@ from marketlab.analysis.plan import AnalysisPlan
 from marketlab.cli.output import Emitter, ExitCode
 from marketlab.core.clock import SystemClock
 from marketlab.core.failures import ConfigurationError, IntegrityError, MarketLabError
+from marketlab.experiments.arms import spec_for
 from marketlab.ingestion.synthetic import register_synthetic_calendars
 from marketlab.instruments.calendars import CalendarRegistry
+from marketlab.models.types import TokenUsage
+from marketlab.power.cost import CostModel, Prices, TokenProfile
+from marketlab.power.dgp import Scenario
+from marketlab.power.simulate import run_power
 from marketlab.replay.verifier import ReplayConfig, ReplayVerifier
 from marketlab.storage.blobs import BlobStore
 from marketlab.storage.database import Database
@@ -92,6 +98,19 @@ def _load_config(path: Path) -> StudyConfig:
             f"{path} must contain a mapping of configuration keys, got {type(payload).__name__}."
         )
     return StudyConfig.from_payload(payload)
+
+
+def _int_list(text: str, option: str) -> list[int]:
+    """Parse a comma-separated integer list, refusing anything else."""
+    try:
+        values = [int(part.strip()) for part in text.split(",") if part.strip()]
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"{option} must be comma-separated integers, got {text!r}"
+        ) from exc
+    if not values:
+        raise ConfigurationError(f"{option} must name at least one value.")
+    return values
 
 
 def _fail(emitter: Emitter, error: Exception, code: ExitCode) -> None:
@@ -400,6 +419,180 @@ def replay(
         study.session.close()
         database.close()
         target.close()
+
+
+@app.command()
+def power(
+    dates: Annotated[
+        str, typer.Option("--dates", help="Comma-separated study durations to curve over.")
+    ] = "20,40,60,90,120",
+    skill_gap: Annotated[
+        float,
+        typer.Option("--skill-gap", help="True effect: extra share of the signal B recovers."),
+    ] = 0.20,
+    baseline_skill: Annotated[
+        float, typer.Option("--baseline-skill", help="Share of the signal the control recovers.")
+    ] = 0.30,
+    horizons: Annotated[str, typer.Option("--horizons", help="Horizons to compare.")] = "1,5,20",
+    instruments: Annotated[int, typer.Option("--instruments", help="Panel instruments.")] = 4,
+    repetitions: Annotated[int, typer.Option("--repetitions", help="Repetitions per arm.")] = 1,
+    rope_lower: Annotated[
+        float, typer.Option("--rope-lower", help="Candidate ROPE floor.")
+    ] = -0.005,
+    rope_upper: Annotated[
+        float, typer.Option("--rope-upper", help="Candidate ROPE ceiling.")
+    ] = 0.005,
+    replications: Annotated[
+        int, typer.Option("--replications", help="Monte Carlo replications.")
+    ] = 200,
+    resamples: Annotated[
+        int, typer.Option("--resamples", help="Bootstrap resamples per analysis.")
+    ] = 400,
+    seed: Annotated[str, typer.Option("--seed", help="Simulation seed.")] = "marketlab-power",
+    as_json: Annotated[bool, _JSON_OPTION] = False,
+    quiet: Annotated[bool, _QUIET_OPTION] = False,
+) -> None:
+    """Simulate the study's power, through the real analysis pipeline.
+
+    Every replication is analysed by the same AnalysisPlan that will produce
+    the published result, so what comes out is the power of the analysis that
+    will actually be run rather than of a closed-form stand-in for it.
+
+    The null is simulated alongside every scenario, always. A procedure can be
+    made arbitrarily powerful by being arbitrarily wrong, and the
+    false-positive rate is what shows that it has not been.
+    """
+    emitter = Emitter(as_json=as_json, quiet=quiet)
+    try:
+        durations = _int_list(dates, "--dates")
+        wanted = tuple(_int_list(horizons, "--horizons"))
+        rope = Rope(rope_lower, rope_upper)
+        treated = min(1.0, baseline_skill + skill_gap)
+    except MarketLabError as error:
+        _fail(emitter, error, _code_for(error))
+        return
+
+    for duration in durations:
+        for horizon in wanted:
+            for world, skill in (
+                ("null", {"A": baseline_skill, "B": baseline_skill}),
+                ("effect", {"A": baseline_skill, "B": treated}),
+            ):
+                emitter.progress(f"simulating {world}: {duration} sessions, horizon {horizon}")
+                try:
+                    result = run_power(
+                        Scenario(
+                            skill=skill,
+                            dates=duration,
+                            instruments=instruments,
+                            horizons=wanted,
+                            repetitions=repetitions,
+                            seed=seed,
+                        ),
+                        treatment="B",
+                        control="A",
+                        horizon_sessions=horizon,
+                        rope=rope,
+                        replications=replications,
+                        resamples=resamples,
+                    )
+                except MarketLabError as error:
+                    _fail(emitter, error, _code_for(error))
+                    return
+                emitter.event("power", world=world, **result.as_payload())
+
+
+@app.command()
+def cost(
+    config: Annotated[Path, typer.Option("--config", help="Study configuration (YAML or JSON).")],
+    input_price: Annotated[
+        str, typer.Option("--input-price", help="Price per million input tokens.")
+    ],
+    output_price: Annotated[
+        str, typer.Option("--output-price", help="Price per million output tokens.")
+    ],
+    cached_input_price: Annotated[
+        str | None,
+        typer.Option("--cached-input-price", help="Price per million cached input tokens."),
+    ] = None,
+    turns: Annotated[
+        float, typer.Option("--turns", help="Mean model turns per elicitation.")
+    ] = 5.0,
+    fixed_tokens: Annotated[
+        int, typer.Option("--fixed-tokens", help="System prompt plus tool catalogue.")
+    ] = 400,
+    granted_tokens: Annotated[
+        int, typer.Option("--granted-tokens", help="Injected material, for arms granted any.")
+    ] = 1500,
+    evidence_tokens: Annotated[
+        int, typer.Option("--evidence-tokens", help="Tool output per elicitation.")
+    ] = 5000,
+    output_tokens: Annotated[
+        int, typer.Option("--output-tokens", help="Generated tokens per elicitation.")
+    ] = 2000,
+    currency: Annotated[
+        str, typer.Option("--currency", help="Currency label for the total.")
+    ] = "USD",
+    as_json: Annotated[bool, _JSON_OPTION] = False,
+    quiet: Annotated[bool, _QUIET_OPTION] = False,
+) -> None:
+    """Project what a configured study costs in API calls, per arm.
+
+    Prices are required: a library that shipped one would be quoting a tariff
+    it cannot know. The token profile is an **assumption** until a pilot has
+    been measured, and every line of the output says so.
+    """
+    emitter = Emitter(as_json=as_json, quiet=quiet)
+    try:
+        study = _load_config(config)
+        prices = Prices(
+            input_per_million=Decimal(input_price),
+            output_per_million=Decimal(output_price),
+            cached_input_per_million=(
+                Decimal(cached_input_price) if cached_input_price is not None else None
+            ),
+            currency=currency,
+        )
+    except (MarketLabError, ArithmeticError) as error:
+        _fail(emitter, ConfigurationError(str(error)), ExitCode.CONFIGURATION)
+        return
+
+    # Two elicitations per condition per cycle when a panel is configured: the
+    # free decision and the imposed panel, separately billed.
+    per_arm = study.sessions * study.repetitions * (2 if study.panel else 1)
+    total = Decimal(0)
+    total_usage = TokenUsage()
+
+    for arm in study.arms:
+        granted = granted_tokens if spec_for(arm).grants_anything else 0
+        projection = CostModel(
+            TokenProfile(
+                turns=turns,
+                fixed_tokens=fixed_tokens,
+                granted_tokens=granted,
+                evidence_tokens=evidence_tokens,
+                output_tokens=output_tokens,
+            ),
+            prices,
+        ).project(label=str(arm), elicitations=per_arm)
+        total += projection.cost
+        total_usage = total_usage + projection.usage
+        emitter.event("arm_cost", **projection.as_payload())
+
+    emitter.table(
+        "cost",
+        {
+            "run_id": study.run_id,
+            "arms": len(study.arms),
+            "elicitations": per_arm * len(study.arms),
+            "input_tokens": total_usage.input_tokens,
+            "cached_input_tokens": total_usage.cached_input_tokens,
+            "output_tokens": total_usage.output_tokens,
+            "total": f"{total:.2f}",
+            "currency": currency,
+            "basis": "ASSUMED",
+        },
+    )
 
 
 @app.command()

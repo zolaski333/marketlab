@@ -41,6 +41,7 @@ from marketlab.core.clock import Clock
 from marketlab.core.failures import AgentFailureKind, ObservedAgentFailure
 from marketlab.core.ids import IdKind, derive_id
 from marketlab.core.instants import Instant
+from marketlab.models.types import TokenUsage
 from marketlab.storage.base import Base, HashStr, InstantStr, ShortStr
 from marketlab.storage.blobs import BlobStore
 
@@ -90,6 +91,12 @@ class PanelBundleRow(Base):
     unanswered_count: Mapped[int] = mapped_column(Integer, nullable=False)
     tool_calls_made: Mapped[int] = mapped_column(Integer, nullable=False)
     model_turns: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    """The panel is a second, separately billed elicitation. Counted apart
+    from the decision so a cost model can say what the assessment itself
+    costs — which is one of the things open question 8 turns on."""
 
     content_hash: Mapped[str] = mapped_column(HashStr, nullable=False, index=True)
     payload_blob_hash: Mapped[str] = mapped_column(HashStr, nullable=False)
@@ -183,6 +190,9 @@ class PanelStore:
                 unanswered_count=outcome.unanswered_count,
                 tool_calls_made=outcome.tool_calls_made,
                 model_turns=outcome.model_turns,
+                input_tokens=outcome.usage.input_tokens,
+                cached_input_tokens=outcome.usage.cached_input_tokens,
+                output_tokens=outcome.usage.output_tokens,
                 content_hash=content_hash,
                 payload_blob_hash=payload_blob.digest,
             )
@@ -268,6 +278,11 @@ def _outcome_to_payload(outcome: PanelOutcome) -> dict[str, Any]:
         ],
         "tool_calls_made": outcome.tool_calls_made,
         "model_turns": outcome.model_turns,
+        "usage": {
+            "input_tokens": outcome.usage.input_tokens,
+            "cached_input_tokens": outcome.usage.cached_input_tokens,
+            "output_tokens": outcome.usage.output_tokens,
+        },
     }
 
 
@@ -297,4 +312,16 @@ def _payload_to_outcome(snapshot_id: str, payload: Mapping[str, Any]) -> PanelOu
         ),
         tool_calls_made=int(payload["tool_calls_made"]),
         model_turns=int(payload["model_turns"]),
+        usage=_usage_from_payload(payload.get("usage")),
+    )
+
+
+def _usage_from_payload(payload: Any) -> TokenUsage:
+    """Absent for panels sealed before usage was recorded."""
+    if not payload:
+        return TokenUsage()
+    return TokenUsage(
+        input_tokens=int(payload["input_tokens"]),
+        cached_input_tokens=int(payload["cached_input_tokens"]),
+        output_tokens=int(payload["output_tokens"]),
     )

@@ -26,6 +26,19 @@ not two independent observations of the world. They are averaged into one
 number for that arm, which is what makes independent repetitions useful
 (they shrink within-condition noise) without letting them inflate the sample
 size the bootstrap thinks it has.
+
+...unless stability is the question
+------------------------------------
+:class:`RepetitionStatistic` lets a cell summarise its repetitions by their
+**dispersion** instead of their mean. That turns the same pipeline into a test
+of *decision stability under identical bundles* — one of the candidate primary
+metrics (open question 1) — rather than of accuracy. Both are loss-oriented,
+so a negative paired difference means the treatment did better either way and
+no sign convention changes underneath the reader.
+
+Stability needs at least two repetitions and says so: measured from a single
+draw it is identically zero for every arm, which would report a perfect tie
+rather than an unanswerable question.
 """
 
 from __future__ import annotations
@@ -34,6 +47,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from statistics import fmean
 
 from marketlab.core.failures import ConfigurationError, IntegrityError
 from marketlab.core.instants import Instant
@@ -50,8 +64,21 @@ __all__ = [
     "DroppedCell",
     "PairedItem",
     "PairedSample",
+    "RepetitionStatistic",
     "pair_scores",
 ]
+
+
+class RepetitionStatistic(StrEnum):
+    """How a cell's repetitions are summarised into one number per arm."""
+
+    MEAN = "MEAN"
+    """Average score. Measures accuracy. The default."""
+
+    DISPERSION = "DISPERSION"
+    """Standard deviation of the reported probabilities. Measures decision
+    stability under identical bundles — a different question about the same
+    data, and a candidate primary metric in its own right."""
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -100,6 +127,7 @@ class PairedSample:
     rule: ScoringRule
     items: tuple[PairedItem, ...]
     dropped: tuple[DroppedCell, ...]
+    statistic: RepetitionStatistic = RepetitionStatistic.MEAN
 
     @property
     def completeness(self) -> float:
@@ -138,6 +166,7 @@ class PairedSample:
             dropped=tuple(
                 drop for drop in self.dropped if drop.cell.horizon_sessions == horizon_sessions
             ),
+            statistic=self.statistic,
         )
 
 
@@ -147,6 +176,7 @@ def pair_scores(
     arms: Sequence[str],
     rule: ScoringRule = ScoringRule.BRIER,
     source: ForecastSource = ForecastSource.PANEL,
+    statistic: RepetitionStatistic = RepetitionStatistic.MEAN,
 ) -> PairedSample:
     """Turn resolved forecasts into cells every compared arm answered.
 
@@ -163,6 +193,15 @@ def pair_scores(
             every condition; a disagreement means resolution itself is broken
             and must not be averaged over.
     """
+    if statistic is RepetitionStatistic.DISPERSION:
+        counts = {row.repetition for row in resolutions}
+        if len(counts) < 2:
+            raise ConfigurationError(
+                "Decision stability cannot be measured from a single repetition: the "
+                "dispersion of one number is zero for every arm, which would report a "
+                "perfect tie rather than an unanswerable question.",
+                repetitions=len(counts),
+            )
     if len(set(arms)) < 2:
         raise ConfigurationError(
             f"Pairing needs at least two distinct arms, got {list(arms)}.", arms=list(arms)
@@ -170,6 +209,7 @@ def pair_scores(
     wanted = tuple(dict.fromkeys(arms))
 
     by_cell: dict[Cell, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    probabilities: dict[Cell, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     outcomes: dict[Cell, bool] = {}
     candidates: set[Cell] = set()
 
@@ -190,6 +230,7 @@ def pair_scores(
                 anchor_at=str(cell.anchor_at),
             )
         by_cell[cell][row.arm_id].append(score(rule, row.probability_up, row.outcome_up))
+        probabilities[cell][row.arm_id].append(row.probability_up)
 
     items: list[PairedItem] = []
     dropped: list[DroppedCell] = []
@@ -215,12 +256,23 @@ def pair_scores(
                 )
             )
             continue
-        items.append(
-            PairedItem(
-                cell=cell,
-                scores={arm: sum(present[arm]) / len(present[arm]) for arm in wanted},
-                outcome_up=outcomes[cell],
-            )
-        )
+        if statistic is RepetitionStatistic.MEAN:
+            scores = {arm: fmean(present[arm]) for arm in wanted}
+        else:
+            scores = {arm: _dispersion(probabilities[cell][arm]) for arm in wanted}
+        items.append(PairedItem(cell=cell, scores=scores, outcome_up=outcomes[cell]))
 
-    return PairedSample(arms=wanted, rule=rule, items=tuple(items), dropped=tuple(dropped))
+    return PairedSample(
+        arms=wanted,
+        rule=rule,
+        items=tuple(items),
+        dropped=tuple(dropped),
+        statistic=statistic,
+    )
+
+
+def _dispersion(values: Sequence[float]) -> float:
+    """Population standard deviation of one arm's answers to one cell."""
+    mean = fmean(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return float(variance**0.5)

@@ -38,13 +38,14 @@ Connecting a real model is Phase 3. Until then,
 ## Status
 
 **Phase 1 complete**: a synthetic vertical slice that runs end to end.
-816 tests, `mypy --strict` clean, five quality gates enforced in CI on Linux and
+877 tests, `mypy --strict` clean, five quality gates enforced in CI on Linux and
 Windows.
 
-Still open before a real study: the power simulation and API cost model
-(task #4), which fixes the primary metric, the region of practical equivalence,
-the number of sessions and the recall depth; a real provider adapter; a real
-data adapter; and architecture decision records (task #5).
+Still open before a real study: a real provider adapter, a real data adapter,
+and architecture decision records (task #5). The power simulation and cost
+model are done — see [docs/POWER.md](docs/POWER.md) — so the primary metric,
+the ROPE and the study duration are now decisions waiting on judgement rather
+than on missing evidence.
 
 ## How the design works
 
@@ -153,7 +154,8 @@ prompt-injection fixture the synthetic world scripts deliberately.
 | Document | What it is for |
 |---|---|
 | [docs/ROADMAP.md](docs/ROADMAP.md) | **The only place completeness is claimed.** Every `done` row names the test that substantiates it; every gap is stated explicitly. |
-| [docs/PRE_REGISTRATION.md](docs/PRE_REGISTRATION.md) | The study's design, fixed in advance. Currently a complete frame with six decisions still marked open. |
+| [docs/PRE_REGISTRATION.md](docs/PRE_REGISTRATION.md) | The study's design, fixed in advance. A complete frame; the remaining decisions are marked open. |
+| [docs/POWER.md](docs/POWER.md) | Power curves, effective sample size and API cost, produced by running the real analysis pipeline over simulated worlds. The numbers behind the design decisions. |
 | [docs/adr/](docs/adr/) | Architecture decision records. Empty, and the README there says why. |
 
 ## Licence

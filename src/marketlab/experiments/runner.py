@@ -88,7 +88,7 @@ from marketlab.experiments.arms import ARMS, DEFAULT_ARMS, ArmId, spec_for
 from marketlab.experiments.context import ConditionMaterialsProvider
 from marketlab.experiments.ordering import OrderPolicy, execution_order
 from marketlab.forecasting.panel import DEFAULT_HORIZONS, build_panel
-from marketlab.models.types import LanguageModel, TradeSide
+from marketlab.models.types import LanguageModel, TokenUsage, TradeSide
 from marketlab.retrieval.budget import (
     DEFAULT_MAX_EVIDENCE_CHARS,
     DEFAULT_MAX_TOOL_CALLS,
@@ -164,6 +164,16 @@ class DecisionBundleRow(Base):
     failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
     tool_calls_made: Mapped[int] = mapped_column(Integer, nullable=False)
     model_turns: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    """What this condition's decision cost, as the provider reported it.
+
+    Zero means *unmeasured*, not free: the deterministic fake reports
+    nothing. :mod:`marketlab.power.cost` refuses to average over a run
+    whose usage was never measured rather than quietly treating it as a
+    run that cost nothing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,6 +581,7 @@ class CycleRunner:
                 "unanswered_count": outcome.unanswered_count,
                 "tool_calls_made": outcome.tool_calls_made,
                 "model_turns": outcome.model_turns,
+                "total_tokens": outcome.usage.total_tokens,
             },
             occurred_at=as_of,
             run_id=self.config.run_id,
@@ -616,6 +627,9 @@ class CycleRunner:
                 failure_count=len(outcome.failures),
                 tool_calls_made=outcome.tool_calls_made,
                 model_turns=outcome.model_turns,
+                input_tokens=outcome.usage.input_tokens,
+                cached_input_tokens=outcome.usage.cached_input_tokens,
+                output_tokens=outcome.usage.output_tokens,
             )
         )
         # EventStore.append commits internally, so the row above lands in the
@@ -636,6 +650,7 @@ class CycleRunner:
                 "failure_count": len(outcome.failures),
                 "tool_calls_made": outcome.tool_calls_made,
                 "model_turns": outcome.model_turns,
+                "total_tokens": outcome.usage.total_tokens,
             },
             occurred_at=as_of,
             run_id=self.config.run_id,
@@ -748,6 +763,11 @@ def _outcome_to_payload(outcome: DecisionOutcome) -> dict[str, Any]:
         ],
         "tool_calls_made": outcome.tool_calls_made,
         "model_turns": outcome.model_turns,
+        "usage": {
+            "input_tokens": outcome.usage.input_tokens,
+            "cached_input_tokens": outcome.usage.cached_input_tokens,
+            "output_tokens": outcome.usage.output_tokens,
+        },
     }
 
 
@@ -789,6 +809,19 @@ def outcome_from_payload(payload: Mapping[str, Any]) -> DecisionOutcome:
         ),
         tool_calls_made=int(payload["tool_calls_made"]),
         model_turns=int(payload["model_turns"]),
+        usage=_usage_from_payload(payload.get("usage")),
+    )
+
+
+def _usage_from_payload(payload: Any) -> TokenUsage:
+    """Absent for bundles sealed before usage was recorded, which read back
+    as unmeasured rather than as an error."""
+    if not payload:
+        return TokenUsage()
+    return TokenUsage(
+        input_tokens=int(payload["input_tokens"]),
+        cached_input_tokens=int(payload["cached_input_tokens"]),
+        output_tokens=int(payload["output_tokens"]),
     )
 
 

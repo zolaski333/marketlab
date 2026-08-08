@@ -24,6 +24,7 @@ the hash function, and all of it is pinned by tests.
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Iterator, Sequence
 from typing import Final
 
@@ -78,6 +79,32 @@ class DeterministicRng:
         if count < 0:
             raise ConfigurationError(f"count must be >= 0, got {count}", count=count)
         return tuple(self.below(bound) for _ in range(count))
+
+    def uniform(self) -> float:
+        """A draw from ``[0, 1)``, to 32 bits of resolution.
+
+        Built on :meth:`below` so that every random quantity in the platform —
+        an arm ordering, a bootstrap block start, a simulated price increment —
+        comes out of one written-down construction rather than three.
+        """
+        return self.below(_WORD_MAX) / _WORD_MAX
+
+    def normal(self) -> float:
+        """A standard normal draw, by Box-Muller.
+
+        Written out for the same reason the shuffle is: a power simulation
+        published as evidence for a design decision has to be recomputable
+        years later, and ``random.gauss`` is an implementation detail.
+
+        The polar rejection form is avoided deliberately — it consumes a
+        variable number of draws, which would make the stream position depend
+        on the values drawn and so make a scenario's results depend on how
+        many normals happened to be rejected.
+        """
+        first = self.uniform()
+        # log(0) is unreachable for the caller but not for the bit pattern.
+        radius = math.sqrt(-2.0 * math.log(1.0 - first))
+        return radius * math.cos(2.0 * math.pi * self.uniform())
 
     def shuffled[T](self, items: Sequence[T]) -> tuple[T, ...]:
         """Fisher-Yates, walking from the last position down."""

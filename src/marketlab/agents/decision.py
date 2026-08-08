@@ -33,7 +33,7 @@ when it persists the result.
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 from marketlab.core.canonical import to_canonical_value
@@ -45,6 +45,7 @@ from marketlab.models.types import (
     ModelRequest,
     ModelResponse,
     RawDecision,
+    TokenUsage,
     ToolCallRequest,
     ToolCallResult,
     ToolSchema,
@@ -158,6 +159,9 @@ class DecisionOutcome:
     failures: tuple[ObservedAgentFailure, ...]
     tool_calls_made: int
     model_turns: int
+    usage: TokenUsage = field(default_factory=TokenUsage)
+    """Summed over every turn of this decision. Zero under the
+    deterministic fake, which costs nothing to call."""
 
 
 class DecisionAgent:
@@ -193,6 +197,7 @@ class DecisionAgent:
         tool_results: list[ToolCallResult] = []
         failures: list[ObservedAgentFailure] = []
         decision: RawDecision | None = None
+        usage = TokenUsage()
         turn = 0
 
         while turn < condition.max_model_turns:
@@ -207,6 +212,7 @@ class DecisionAgent:
                 )
             )
 
+            usage = usage + response.usage
             outcome = self._handle_response(response, toolkit, tool_results, failures, as_of)
             if outcome == "decided":
                 decision = response.decision
@@ -235,6 +241,7 @@ class DecisionAgent:
             failures=tuple(failures),
             tool_calls_made=len(tool_results),
             model_turns=turn,
+            usage=usage,
         )
 
     def _handle_response(

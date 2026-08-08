@@ -196,7 +196,7 @@ class AnalysisPlan:
                 source=self.source,
             )
             for horizon in self.horizons:
-                outcome = self._compare(contrast, horizon, sample)
+                outcome = self.compare_prepared(contrast, horizon, sample)
                 if isinstance(outcome, SkippedComparison):
                     skipped.append(outcome)
                 else:
@@ -217,9 +217,20 @@ class AnalysisPlan:
             alpha=self.alpha,
         )
 
-    def _compare(
+    def compare_prepared(
         self, contrast: Contrast, horizon: int, sample: PairedSample
     ) -> Comparison | SkippedComparison:
+        """One contrast at one horizon, over a sample the caller already paired.
+
+        Public because pairing is the only step a caller may legitimately want
+        to do itself: the stability metric summarises a cell by the dispersion
+        of its repetitions rather than by a score, which
+        :meth:`run` — which pairs internally with the default statistic —
+        cannot express. Everything downstream of pairing (aggregation, the
+        block bootstrap, TOST, the sign convention) is still this plan's, so a
+        power estimate for stability prices the same analysis as one for
+        accuracy.
+        """
         narrowed = sample.restricted_to(horizon)
         if not narrowed.items:
             return SkippedComparison(
