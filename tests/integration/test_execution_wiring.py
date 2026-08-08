@@ -44,6 +44,7 @@ from marketlab.execution.engine import (
 from marketlab.execution.policy import ExecutionPolicy
 from marketlab.experiments.arms import ArmId
 from marketlab.experiments.context import NullMaterialsProvider
+from marketlab.experiments.driver import CycleDriver
 from marketlab.experiments.runner import CycleResult, CycleRunner, RunConfig
 from marketlab.ingestion.pipeline import IngestionPipeline
 from marketlab.ingestion.synthetic import SyntheticMarketDataProvider, admit_synthetic_universe
@@ -137,16 +138,20 @@ def world(session: Session, clock: FrozenClock, blob_store: BlobStore) -> World:
         instruments=repo,
     )
     config = RunConfig(run_id=RUN_ID, arms=ARMS)
-    runner = CycleRunner(
-        session=session,
-        clock=clock,
-        blobs=blob_store,
-        events=events,
-        builder=builder,
-        model_factory=DeterministicPolicyModel,
-        materials=NullMaterialsProvider(),
-        config=config,
-        agent=DecisionAgent(),
+    driver = CycleDriver(
+        runner=CycleRunner(
+            session=session,
+            clock=clock,
+            blobs=blob_store,
+            events=events,
+            builder=builder,
+            model_factory=DeterministicPolicyModel,
+            materials=NullMaterialsProvider(),
+            config=config,
+            agent=DecisionAgent(),
+        ),
+        engine=engine,
+        applier=applier,
     )
     portfolios = {arm: portfolio_id_for(RUN_ID, str(arm), 0) for arm in ARMS}
     for portfolio_id in portfolios.values():
@@ -173,30 +178,15 @@ def world(session: Session, clock: FrozenClock, blob_store: BlobStore) -> World:
             )
 
         manifest = builder.build(candidates, as_of=cutoff, run_id=RUN_ID)
-        snapshot = builder.load_index(manifest.snapshot_id)
 
-        # Order of a cycle, and the reason for it: reference data first (the
-        # universe every arm sees must already be correct), then per-book
-        # settlement and corporate actions, then fills of orders placed last
-        # session, and only then this session's decisions.
-        applier.apply_to_reference_data(snapshot)
-        for portfolio_id in portfolios.values():
-            engine.settle_due(portfolio_id=portfolio_id, now=cutoff)
-            applier.apply_to_portfolio(snapshot, portfolio_id=portfolio_id)
-            engine.execute_due(portfolio_id=portfolio_id, index=snapshot, now=cutoff)
-
-        cycle = runner.run_cycle(
+        # The step order — reference data, settlement, corporate actions,
+        # fills, decisions, placement — belongs to CycleDriver rather than to
+        # this test, so the sequence exercised here is the one a real run and
+        # a replay both take.
+        report = driver.run(
             cycle_index=index_number, snapshot_id=manifest.snapshot_id, as_of=cutoff
         )
-        for execution in cycle.executions:
-            engine.place_orders(
-                execution.outcome.trade_intents,
-                portfolio_id=portfolios[execution.arm_id],
-                bundle_id=execution.bundle_id,
-                index=snapshot,
-                decided_at=cutoff,
-            )
-        cycles.append(cycle)
+        cycles.append(report.cycle)
         cutoffs.append(cutoff)
 
     return World(
