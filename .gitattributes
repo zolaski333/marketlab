@@ -1,0 +1,17 @@
+# Normalise line endings to LF in the repository, whatever the checkout does.
+#
+# This is not cosmetic. `ruff format --check` compares bytes, and the CI matrix
+# runs on Linux and Windows. A file stored with CRLF would pass the formatting
+# gate on one leg of the matrix and fail it on the other, for reasons unrelated
+# to the code — and the first Linux run would be the one to discover it.
+* text=auto eol=lf
+
+# Binary-ish artefacts that must never be line-ending converted.
+*.db binary
+*.png binary
+*.jpg binary
+*.ico binary
+
+# The lock file is generated. Keep it out of diff review noise, but do keep it
+# in the repository: `uv sync --frozen` in CI is meaningless without it.
+uv.lock linguist-generated=true -diff

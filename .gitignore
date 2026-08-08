@@ -17,14 +17,16 @@ htmlcov/
 #
 # data/ holds the scientific source of truth (§24.3) for a live run: raw blobs,
 # the append-only event store and derived tables. It is deliberately NOT
-# committed — a study is released through `marketlab export release`, which
-# produces a signed, hash-verified bundle under data/releases/.
+# committed. A study database can also contain vendor data that is not
+# redistributable, which is why blob metadata carries a `redistributable` flag
+# per source.
 #
-# data/fixtures/ IS committed: it is what makes the synthetic slice reproducible
-# from a clean checkout (§32 "données synthétiques fournies").
+# There is no committed fixture directory, and no export command yet: the
+# Phase 1 world is a closed-form function of a session index, so a clean
+# checkout reproduces it byte for byte by running it (§32). A signed,
+# hash-verified release bundle is Phase 3 work and is not claimed here.
 # ---------------------------------------------------------------------------
 data/*
-!data/fixtures/
 !data/.gitkeep
 
 # Secrets — never committed (§11.4)

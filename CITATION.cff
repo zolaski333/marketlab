@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+title: >-
+  MarketLab: a prospective, reproducible platform for studying memory and
+  reflection in decision-making LLM agents
+message: >-
+  If you use this software or its design in your research, please cite it. If
+  you cite results produced with it, please also state which model was used and
+  which pre-registration applied — see docs/PRE_REGISTRATION.md.
+type: software
+authors:
+  - name: MarketLab contributors
+    alias: zolaski333
+license: MIT
+repository-code: "https://github.com/zolaski333/marketlab"
+abstract: >-
+  MarketLab studies whether persistent memory and periodic strategic reflection
+  improve the probabilistic quality, coherence and stability of an LLM agent's
+  decisions in a virtual multi-asset market. It is prospective and
+  point-in-time correct by construction: nothing an agent reads was visible
+  later than the instant it decided. The design is a crossed 2x2 of (memory,
+  reflection) with matched placebos, run against a shared frozen snapshot so
+  that a difference between conditions cannot be a difference in what they were
+  shown. Financial performance is a secondary, exploratory measure; a positive
+  return is never treated as evidence of competence. No real money is ever
+  involved and no investment advice is produced.
+keywords:
+  - large language models
+  - agents
+  - forecasting
+  - calibration
+  - reproducibility
+  - pre-registration
+  - virtual market
