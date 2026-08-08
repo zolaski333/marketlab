@@ -36,7 +36,7 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
+Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
 
 ---
 
@@ -70,12 +70,13 @@ Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
   Migrations become necessary only once a study is live and the schema changes;
   `Database.migration_mode()` is the audited window they will run in.
 - **The decision-path isolation lint protects `agents/`, `retrieval/`,
-  `forecasting/`.** As of task 8, `retrieval/` and `agents/` are both
-  populated and the guard does real work for them
-  (`tests/security/test_decision_path_isolation.py` scans real files, not
-  empty directories). `forecasting/` is still empty, so the test passes
-  vacuously for it until task 12 puts code there — that is the point of
-  writing the guard before the code it guards exists, not after.
+  `forecasting/`.** All three are now populated, so the guard does real work
+  for each (`tests/security/test_decision_path_isolation.py` scans real files,
+  not empty directories). `forecasting/` was the last to fill, at task 11, and
+  the guard shaped its design rather than being retrofitted to it: the panel
+  had to be persisted from `evaluation/panels.py` precisely because
+  `forecasting/` may not hold a session. That is what writing the guard before
+  the code it guards is for.
 
 ---
 
@@ -114,8 +115,13 @@ Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
 | Matched placebo memory and reflection for B′ / C′ (§13) | `done` | `tests/unit/test_memory_materials.py` |
 | Imposed, isolated forecast panel (§15) | `done` | `tests/unit/test_panel.py` |
 | Six conditions wired end to end and genuinely distinguishable | `done` | `tests/integration/test_materials_wiring.py` |
-| Forecast resolution and the statistical plan (§20, §21) | `not started` | — |
-| Real replay that recomputes and compares (§12.5, §30.4) | `not started` | — |
+| Imposed panel persisted and elicited inside the cycle (§15.4) | `done` | `tests/unit/test_panel_store.py`, `tests/unit/test_cycle_runner.py` |
+| One supported cycle step order, shared by the run and the replay | `done` | `tests/unit/test_cycle_driver.py` |
+| Deterministic total-return forecast resolution, five statuses (§20) | `done` | `tests/unit/test_resolution.py`, `tests/unit/test_resolution_store.py` |
+| Proper scoring rule and calibration table (§21.1) | `done` | `tests/unit/test_scoring.py` |
+| Paired analysis: (date, instrument) pairing, cross-sectional aggregation, real block bootstrap, TOST/ROPE, multiplicity (§21.2–§21.7) | `done` | `tests/unit/test_analysis.py`, `tests/unit/test_bootstrap.py` |
+| Resolution and the analysis plan wired end to end over the synthetic world | `done` | `tests/integration/test_evaluation_wiring.py` |
+| Real replay that recomputes and compares (§12.5, §30.4) | `done` | `tests/replay/test_replay_verifier.py` |
 | CLI (§29) | `not started` | — |
 
 ### Known gaps in what is marked `done`
@@ -195,13 +201,20 @@ Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
   deliberate (see `marketlab.execution.policy`) but it bounds the claim: the
   study measures direction and timing quality, **not portfolio construction**.
   An arm cannot win by sizing, and cannot demonstrate skill at sizing either.
-- **The cycle's step order is the caller's responsibility, not the
-  platform's.** `tests/integration/test_execution_wiring.py` drives it —
-  reference data, then settlement, corporate actions, fills, decisions — and
-  `marketlab.accounting.positions._SEQUENCE_RANK` records the same order for
-  the fold. Nothing yet *enforces* that a driver calls them in that order; the
-  CLI (task 13) is where that sequence should become a single supported entry
-  point rather than a convention two places agree on.
+- **The cycle's step order now lives in `marketlab.experiments.driver`.**
+  `CycleDriver.run` is the single supported sequence — reference data,
+  settlement, corporate actions, fills, decisions, placement — and
+  `tests/unit/test_cycle_driver.py` asserts it directly rather than inferring
+  it from a downstream number. The integration test and the replay both go
+  through it, so the sequence is no longer a convention two places agree on.
+  What is still *not* enforced is that a caller uses the driver at all; the
+  CLI (task 13) is where it becomes the only entry point.
+- **Resolution runs as a pass over a run, not as a step inside the cycle.**
+  Correct for a completed study and safe to re-run (it is idempotent and only
+  ever writes terminal verdicts), but a prospective study resolving as it goes
+  would want it per cycle. Nothing consumes outcomes during a run today —
+  precisely because memory outcome feedback is deferred (open question 9) —
+  so the distinction currently costs nothing.
 
 - **Granted material reaches the model, but the shipped fake ignores it.**
   `DeterministicPolicyModel` is a closed-form function of the closing price
@@ -215,11 +228,18 @@ Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
   `tests/integration/test_materials_wiring.py` drives a test double that does
   read its context and gets different decisions per arm through the same
   pipeline. Demonstrating a real effect needs a real provider (Phase 3).
-- **Reflection says nothing about whether forecasts came true.** The rules are
-  about the condition's own behaviour — persistence on one side, churn,
-  probabilities that barely move, recurring malformed output. Hit rates and
-  calibration need forecast resolution, which is task 12. A rule claiming
-  accuracy today would be fabricated, and a test asserts none of them does.
+- **Reflection still says nothing about whether forecasts came true, and
+  memory still records only what a condition decided.** Resolution now exists
+  (task 12), so the raw material for outcome feedback is there — but wiring it
+  into the granted material is a **change to the treatment**, not a missing
+  feature. §13 defines what each arm is given; an arm that is shown its own
+  hit rate is a different arm from one shown its own past decisions, and the
+  difference would have to be re-piloted rather than slipped in. It would also
+  have to be done point-in-time (only outcomes whose target session is
+  strictly before the recall cutoff) and the placebo would have to match the
+  *resolved* forecast count, not just the forecast count. Raised as open
+  question 10 for the study owner rather than decided here. A test still
+  asserts that no reflection rule claims accuracy today.
 - **Reflection is closed-form, not model-authored.** A real deployment would
   ask a model to reflect. The deterministic version exists so a reflection can
   be replayed and reasoned about; swapping in a model-authored one changes no
@@ -237,14 +257,12 @@ Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
   every five cycles are round numbers, like the tool budget. Both trade
   context cost against how much history a condition can see, and both depend
   on the still-open API cost model (task #4).
-- **The panel is elicited but not yet persisted or scored.** `PanelAgent`
-  produces answers and records `MISSING_PANEL_ITEM` for unanswered items, but
-  nothing stores a panel bundle, and scoring the answers is task 12. Today the
-  panel is exercised in tests rather than run inside `CycleRunner`.
-- **Memory records what a condition decided, not what happened to it.**
-  There is no outcome feedback in an episode, because resolution does not
-  exist yet. That makes the memory treatment weaker than a real one would be,
-  and is the single largest thing task 12 will change about it.
+- **The panel runs only when `CycleRunner` is given a `PanelStore`.** Left
+  unset, no panel is elicited at all — deliberately, so that a study with no
+  panel has *nothing recorded* rather than an empty panel recorded as though
+  it had been asked. It also means a run configured without one produces
+  nothing `marketlab.analysis.pairing` can compare, and the CLI (task 13) is
+  where that should stop being possible by accident.
 - **`DecisionOutcome` still carries no `bundle_id`, by design.**
   `marketlab.agents.decision` structurally cannot know the run id, arm id, or
   repetition number — knowing them would itself be the condition leak that
@@ -296,6 +314,76 @@ Last verified: 535 tests passing, `mypy --strict` clean on 65 source files.
   partial evidence it gathered before hitting the cap — simpler, but worth
   revisiting once real provider cost/latency tradeoffs are known (task #4).
 
+- **The horizon grid is the run's own decision cadence, not each instrument's
+  trading calendar.** "In N sessions" is resolved against the ordered instants
+  at which the run actually decided, read back from its snapshots. A
+  per-instrument calendar grid is more faithful for a universe spanning
+  several calendars, but resolves to instants at which no snapshot exists and
+  therefore no price was ever frozen. `marketlab.evaluation.resolution.SessionGrid`
+  is the single type to change. Stated as an interpretation, not a quotation
+  of §20.
+- **A flat close is scored as "not up".** A rise is strictly positive. Rare at
+  four decimal places, but the convention had to be fixed in advance rather
+  than settled once someone noticed a tie in the data.
+- **A dividend's cash is not reinvested in the total-return calculation.** It
+  is added to the terminal value at its face amount, matching what the ledger
+  actually does with it (credit cash, earn nothing). A reinvested-dividend
+  convention would be a different, equally defensible definition; it is not
+  the one implemented.
+- **The log score is deliberately not offered.** It is proper and better at
+  punishing overconfidence, but infinite at `p ∈ {0, 1}`, which real models do
+  emit — so every implementation clips, and the clip value silently sets how
+  much a single confident error is worth. That is a pre-registration decision
+  with real consequences for the primary metric, and
+  `marketlab.evaluation.scoring` will not invent one. `ABSOLUTE_ERROR` is
+  offered as a robustness check and is documented as **improper**.
+- **Calibration bin edges are a placeholder.** Five equal bins, like the tool
+  budget and the recall depth. Empty bins are omitted rather than reported as
+  a zero rate, so a coarse choice cannot manufacture a finding.
+- **The bootstrap block length is a rule of thumb (`round(n**(1/3))`), not an
+  estimate.** Data-driven selectors exist and depend on the autocorrelation
+  the study has not measured yet (task #4). The value used is carried on every
+  result, so an interval always says which block length produced it.
+- **Equivalence is tested off the bootstrap, not off a t-distribution.** TOST
+  at level α corresponds to a `1 - 2α` percentile interval, and the ROPE
+  decision rule is the three-valued one (inside → equivalent, disjoint →
+  different, straddling → inconclusive). This avoids assuming normality on a
+  few dozen dates; it inherits the block bootstrap's own coverage properties,
+  which are asymptotic and unmeasured at this sample size — another thing
+  task #4's power simulation exists to check.
+- **Only complete cases are analysed, and imputation is not offered.** A cell
+  enters the comparison only if every compared arm has a resolved score for
+  it. What is dropped is counted and reported per reason
+  (`PairedSample.dropped_by_reason`), which is what makes §23.4's paired
+  policy checkable rather than asserted.
+- **Repetitions of one arm are averaged within a cell, not stacked.** They are
+  two draws from one condition, not two observations of the world. A cell
+  where the arms are represented by *different* numbers of repetitions is
+  dropped rather than weighted unequally.
+- **The analysis compares forecast quality only.** Decision stability under
+  identical bundles, evidential fidelity and portfolio outcomes are all
+  recorded (`decision_bundles.content_hash`, the citation validation, the
+  ledger) but none has a comparison plan yet. Which of them is the *primary*
+  metric is open question 1, still waiting on the power simulation.
+
+- **A replay must be handed the calendars, the execution policy and the run
+  configuration.** None of the three is persisted, so a replay given different
+  ones reports divergences — correct, since it would genuinely be a different
+  study, but it means "replay this run" is not yet a single self-contained
+  operation. A `runs` table (see the `RunConfig` gap above) would close it.
+- **A replay cannot re-elicit a model, by construction.** Sealed decisions and
+  panels are inputs to it, exactly as the raw market data is; their
+  fingerprints are re-derived from the payloads behind them, and everything
+  downstream — sizing, filling, settling, bookkeeping, corporate actions,
+  resolution — is recomputed from nothing. The model factory a replay hands
+  every runner raises if constructed, so this is structural rather than a
+  convention.
+- **Ledger and position comparison is on balances, not on individual rows.**
+  An entry id embeds its transaction id, which legitimately differs when
+  nothing else does. What must match to the cent is what the books say; a
+  replay that produced the same balances by a different sequence of postings
+  would not be flagged.
+
 ---
 
 ## Decisions taken that depart from the specification
@@ -318,6 +406,12 @@ Each is deliberate; none is silent.
 | §13 | Placebo material for B′/C′ | The placebo reuses the **genuine renderer** over fabricated episodes, sized from the arm's own `EpisodeShape` | Hand-writing filler and hoping it came out the same length would leave the comparison confounded by whichever was longer, with no way to tell by how much. Shape is read from integer columns only, so a placebo is structurally incapable of carrying genuine content. |
 | §19 | Strategic reflection | Deterministic closed-form rules over the condition's own record, not a model-authored reflection | Phase 1 has no real provider, and a reflection produced by an opaque process could not be replayed (§12.5). Same reasoning as the deterministic policy fake. |
 | §12.1 | A provider's own tool-calling wire format | A custom, provider-independent request/response loop (`ModelRequest`/`ModelResponse`/`ToolCallRequest`/`ToolCallResult`) | Mirroring one real provider's exact shape would make that provider's quirks look like part of the platform's core contract. `marketlab.agents.decision.DecisionAgent` drives this loop generically; a real Phase 3 adapter translates to and from its provider's own format at the edge. See the `marketlab.models.types` docstring. |
+| §20 | "In N sessions", on the instrument's calendar | N points on the **run's own decision grid**, read back from its snapshots | The synthetic world prices every instrument at the US equity session close, so an EU or 24/7 calendar resolves to instants at which no snapshot exists and no price was ever frozen. The grid is identical for every arm, deterministic, and reconstructible from persisted artefacts alone — and immune to a missing bar silently turning a 5-session horizon into a 6-session one. `SessionGrid` is the single type a real multi-calendar study would change. |
+| §20.3 | `PENDING` among the resolution statuses | Computed but **never persisted** | Persisting it would mean either updating that row when the horizon elapses — which the append-only triggers refuse — or leaving a stale row claiming an already-resolved forecast is still open. Pending is the absence of a verdict, so it is represented by the absence of a row. |
+| §21.4 | Bootstrap by blocks | Moving block bootstrap over an explicit SHA-256 key stream, sharing `core/rng.py` with the arm ordering | Same reasoning as §13.4: `random.shuffle`/`choices` are implementation details that have changed between CPython versions, and a published interval must be recomputable years later on a different interpreter. |
+| §21.7 | TOST against a ROPE | TOST read off the **bootstrap distribution**, with the three-valued ROPE decision rule | A parametric TOST assumes normality on a few dozen dates. Reading both one-sided tests off the same block bootstrap that produced the interval keeps one set of distributional assumptions instead of two. "Inconclusive" is kept as a distinct verdict rather than collapsed into "no difference", which is how underpowered studies come to claim null results. |
+| §21 | An analysis plan | A plan object that **cannot be constructed without a ROPE** | §21.7 requires "no practically useful effect" to be reachable, which requires a pre-registered region of practical equivalence. Giving `Rope` a default would let the library make a scientific claim on the study owner's behalf; making it a required field makes the omission impossible to overlook. |
+| §12.5 | Exact replay | Replay of everything **downstream of the model**, into a separate database, compared field by field | A real provider is not a pure function, so re-running the decision loop would produce a different decision and report a divergence that is not a defect. Sealed decisions are inputs; their fingerprints are still re-derived from the payloads behind them. Every mistake the platform itself can make lies downstream of the model, and all of it is recomputed. See the `marketlab.replay.verifier` docstring. |
 
 ## Open questions for the study owner
 
@@ -332,8 +426,13 @@ Each is deliberate; none is silent.
    finalised. Working assumption: decide at close of session *t*, execute at the
    open of *t+1*.
 3. **Equivalence bounds.** §21.7 requires "no practically useful effect" to be a
-   reachable conclusion. That requires a pre-registered ROPE; none is defined
-   yet.
+   reachable conclusion. That requires a pre-registered ROPE, and none is
+   defined yet. As of task 12 this is enforced rather than merely noted:
+   `marketlab.analysis.plan.AnalysisPlan` has no default `rope` and cannot be
+   constructed without one, so no analysis can be run until the study owner
+   fixes the band. A ROPE on the Brier scale is not intuitive — 0.01 is a
+   large effect there — so the number should come out of the power simulation
+   (task #4) alongside the primary metric.
 4. **Tool budget magnitudes.** `ToolBudget`'s defaults (20 calls, 20,000
    evidence characters per decision) are round-number placeholders, not a
    pre-registered decision — they exist so the budget mechanism has something
@@ -361,7 +460,18 @@ Each is deliberate; none is silent.
    currently gets its own, so answering it costs a condition nothing it could
    have spent deciding. The alternative — one budget across both — would make
    the panel a real opportunity cost and might itself differ between arms.
-9. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
+9. **Should an episode carry what happened to it?** Resolution now exists, so
+   a condition's memory *could* be shown that its 0.7 on Alpha five sessions
+   ago turned out right. That would be a materially stronger treatment, and it
+   is very likely the version a real deployment would use. It is not
+   implemented, because it changes what arms B and C *are*: §13 defines each
+   arm by what it is granted, and an arm shown its own hit rate is a different
+   arm from one shown its own past decisions. It needs the study owner's
+   decision, a point-in-time rule (only outcomes whose target session is
+   strictly before the recall cutoff, or the agent sees the future), and a
+   placebo matched on the *resolved* forecast count. Deliberately deferred
+   rather than slipped in.
+10. **`SnapshotStatus` completeness criteria (§23.2).** This implementation
    treats a snapshot as `DEGRADED`/`INVALID` based on missing *price* data for
    actively-tradable instruments only, and treats missing news/macro/FX as
    normal rather than degrading. If the specification intends a stricter or
