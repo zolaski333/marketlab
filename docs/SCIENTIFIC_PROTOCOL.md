@@ -8,6 +8,16 @@ This is the *methodological* document. The binding parameter values live in
 deliberately incomplete until its open decisions are made. Where the two
 disagree, the pre-registration wins: it is the one that binds a run.
 
+Nothing here claims anything is finished. This document describes the method
+the platform implements; whether a given piece of it is done is claimed in
+[ROADMAP.md](ROADMAP.md) and nowhere else.
+
+> Arms are written with the specification's prime notation — **B′**, **C′**.
+> The code spells the same labels with an ASCII apostrophe (`B'`), because the
+> linter treats U+2032 in source as an ambiguous character. Same arm, two
+> typographies; `tests/test_documentation.py` normalises between them so the
+> two cannot drift into naming different things.
+
 ## 1. The question, and what would answer it
 
 > Do persistent memory and periodic strategic reflection improve the
