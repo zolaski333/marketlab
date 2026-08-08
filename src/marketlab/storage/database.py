@@ -68,6 +68,7 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
     {
         "events",
         "blob_metadata",
+        "runs",
         "daily_roots",
         "instruments",
         "instrument_versions",

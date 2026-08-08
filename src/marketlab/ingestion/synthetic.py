@@ -60,10 +60,12 @@ from marketlab.instruments.repository import InstrumentRepository
 from marketlab.instruments.types import AssetClass, ExecutionModel, InstrumentView
 
 __all__ = [
+    "SyntheticCalendars",
     "SyntheticMarketDataProvider",
     "SyntheticUniverse",
     "admit_synthetic_universe",
     "generate_session_cutoffs",
+    "register_synthetic_calendars",
 ]
 
 # -- fixture session indices (1-based) --------------------------------------
@@ -385,6 +387,15 @@ _SYNTH_EU_HOLIDAYS_2026: Final = frozenset({date(2026, 1, 1), date(2026, 12, 25)
 
 
 @dataclass(frozen=True, slots=True)
+class SyntheticCalendars:
+    """The three calendars this world trades on."""
+
+    equity: WeekdaySessionCalendar
+    eu: WeekdaySessionCalendar
+    crypto: TwentyFourSevenCalendar
+
+
+@dataclass(frozen=True, slots=True)
 class SyntheticUniverse:
     """The four admitted synthetic instruments and their calendars, wired
     together and ready to hand to a :class:`SyntheticMarketDataProvider`."""
@@ -398,6 +409,37 @@ class SyntheticUniverse:
     delta: InstrumentView
 
 
+def register_synthetic_calendars(calendars: CalendarRegistry) -> SyntheticCalendars:
+    """Register this world's calendars, without admitting anything.
+
+    Separate from :func:`admit_synthetic_universe` because a replay (§12.5)
+    needs the calendars but must **not** re-admit the universe: it copies the
+    recorded admissions instead, so that a ticker change is recomputed from
+    the corporate action rather than handed over as an input.
+    """
+    equity = WeekdaySessionCalendar(
+        code="SYNTH_US_EQUITY",
+        version="v1",
+        iana_tz="America/New_York",
+        session_open=time(9, 30),
+        session_close=time(16, 0),
+        holidays=_SYNTH_US_HOLIDAYS_2026,
+    )
+    eu = WeekdaySessionCalendar(
+        code="SYNTH_EU_EQUITY",
+        version="v1",
+        iana_tz="Europe/Paris",
+        session_open=time(9, 0),
+        session_close=time(17, 30),
+        holidays=_SYNTH_EU_HOLIDAYS_2026,
+    )
+    crypto = TwentyFourSevenCalendar(code="SYNTH_CRYPTO", version="v1")
+    calendars.register(equity)
+    calendars.register(eu)
+    calendars.register(crypto)
+    return SyntheticCalendars(equity=equity, eu=eu, crypto=crypto)
+
+
 def admit_synthetic_universe(
     repo: InstrumentRepository, calendars: CalendarRegistry, at: Instant
 ) -> SyntheticUniverse:
@@ -408,26 +450,10 @@ def admit_synthetic_universe(
     instrument already exists as of session 1 (§7.3 admission is itself
     point-in-time gated, like everything else).
     """
-    equity_calendar = WeekdaySessionCalendar(
-        code="SYNTH_US_EQUITY",
-        version="v1",
-        iana_tz="America/New_York",
-        session_open=time(9, 30),
-        session_close=time(16, 0),
-        holidays=_SYNTH_US_HOLIDAYS_2026,
-    )
-    eu_calendar = WeekdaySessionCalendar(
-        code="SYNTH_EU_EQUITY",
-        version="v1",
-        iana_tz="Europe/Paris",
-        session_open=time(9, 0),
-        session_close=time(17, 30),
-        holidays=_SYNTH_EU_HOLIDAYS_2026,
-    )
-    crypto_calendar = TwentyFourSevenCalendar(code="SYNTH_CRYPTO", version="v1")
-    calendars.register(equity_calendar)
-    calendars.register(eu_calendar)
-    calendars.register(crypto_calendar)
+    registered = register_synthetic_calendars(calendars)
+    equity_calendar = registered.equity
+    eu_calendar = registered.eu
+    crypto_calendar = registered.crypto
 
     alpha = repo.admit(
         asset_class=AssetClass.EQUITY,

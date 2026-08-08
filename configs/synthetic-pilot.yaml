@@ -1,0 +1,40 @@
+# A pilot study over the Phase 1 synthetic world.
+#
+# Every value here is a pre-registration: once `marketlab run` has declared this
+# run_id, changing any of them and re-running is refused. Use a new run_id
+# instead. See docs/ROADMAP.md for which of these are placeholders awaiting the
+# power simulation (task #4) rather than motivated choices.
+
+run_id: SYNTHETIC_PILOT
+world: SYNTHETIC
+start_at: "2026-08-01T00:00:00.000000Z"
+sessions: 20
+
+# The crossed 2x2 of (memory, reflection), plus the matched placebos.
+arms: [A, B, C, D, B_PRIME, C_PRIME]
+repetitions: 1
+seed: marketlab
+order_policy: LATIN_SQUARE
+
+# Per-decision allowance. Placeholders: see open question 4.
+max_tool_calls: 20
+max_evidence_chars: 20000
+max_model_turns: 6
+
+# The imposed panel every condition must answer. Choosing horizons after
+# seeing the results would be choosing which one to report.
+panel: true
+panel_horizons: [1, 5, 20]
+
+# Memory depth and reflection cadence. Placeholders: see open question 7.
+recall_limit: 8
+reflection_interval: 5
+
+# Sizing and capital. Placeholders: see open question 5.
+target_weight: "0.05"
+max_participation: "0.05"
+minimum_notional: "100"
+base_currency: USD
+starting_capital:
+  - [USD, "1000000.00"]
+  - [EUR, "500000.00"]

@@ -452,3 +452,30 @@ def test_a_plan_with_no_contrasts_is_refused() -> None:
 def test_the_scoring_rule_travels_with_the_sample() -> None:
     sample = pair_scores([row(arm="A", day=0), row(arm="B", day=0)], arms=("A", "B"))
     assert sample.rule is ScoringRule.BRIER
+
+
+def test_a_difference_of_exactly_zero_is_not_significant() -> None:
+    """Found by running the CLI end to end: six arms that decided identically
+    produce a degenerate bootstrap at exactly zero. Computing the upper tail
+    as ``1 - P(X <= 0)`` rather than ``P(X >= 0)`` reported p = 0 for them —
+    a difference of nothing, called highly significant, and then carried
+    through the multiplicity correction as a rejection."""
+    result = equivalence_test(_test_result([0.0] * 30), rope=Rope(-0.01, 0.01), label="identical")
+    assert result.estimate == 0.0
+    assert result.p_two_sided == 1.0
+    assert result.verdict is EquivalenceVerdict.EQUIVALENT
+
+
+def test_a_difference_centred_on_zero_is_not_significant_either() -> None:
+    result = equivalence_test(
+        _test_result([0.05, -0.05] * 30), rope=Rope(-0.5, 0.5), label="symmetric"
+    )
+    assert result.p_two_sided > 0.5
+
+
+def test_the_two_sided_p_still_detects_a_real_shift() -> None:
+    """The complement, so the fix above cannot have been a blanket p = 1."""
+    result = equivalence_test(
+        _test_result([0.30, 0.31, 0.29] * 20), rope=Rope(-0.02, 0.02), label="shifted"
+    )
+    assert result.p_two_sided < 0.01

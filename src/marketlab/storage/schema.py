@@ -30,6 +30,7 @@ from marketlab.snapshots.builder import SnapshotMemberRow, SnapshotRow
 from marketlab.storage.base import Base
 from marketlab.storage.blobs import BlobMetadataRow
 from marketlab.storage.events import EventRow
+from marketlab.study.config import RunRow
 
 __all__ = [
     "Base",
@@ -50,6 +51,7 @@ __all__ = [
     "PanelBundleRow",
     "PositionEventRow",
     "ReflectionRow",
+    "RunRow",
     "SettlementRow",
     "SnapshotMemberRow",
     "SnapshotRow",

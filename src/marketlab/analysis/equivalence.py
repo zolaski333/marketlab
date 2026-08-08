@@ -161,7 +161,13 @@ def equivalence_test(
     else:
         verdict = EquivalenceVerdict.INCONCLUSIVE
 
-    below_zero = result.proportion_at_most(0.0)
+    # Both tails are counted with a closed comparison. Using P(X > 0) as the
+    # complement of P(X <= 0) instead looks equivalent and is not: on a
+    # distribution concentrated at exactly zero — six arms that decided
+    # identically, which is what the shipped fake produces — it reports
+    # p = 0 and calls a difference of nothing highly significant.
+    at_most = result.proportion_at_most(0.0)
+    at_least = result.proportion_at_least(0.0)
     return EquivalenceResult(
         label=label,
         estimate=result.estimate,
@@ -171,7 +177,7 @@ def equivalence_test(
         confidence=confidence,
         p_lower=result.proportion_at_most(rope.lower),
         p_upper=result.proportion_at_least(rope.upper),
-        p_two_sided=min(1.0, 2.0 * min(below_zero, 1.0 - below_zero)),
+        p_two_sided=min(1.0, 2.0 * min(at_most, at_least)),
         verdict=verdict,
         observations=result.observations,
         block_length=result.block_length,
