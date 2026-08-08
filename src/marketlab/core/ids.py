@@ -41,6 +41,7 @@ class IdKind(StrEnum):
     CONDITION_CONTEXT = "condition_context"
     DECISION_BUNDLE = "decision_bundle"
     PANEL_BUNDLE = "panel_bundle"
+    PANEL_ITEM = "panel_item"
     MODEL_CALL = "model_call"
     TOOL_CALL = "tool_call"
     FORECAST = "forecast"

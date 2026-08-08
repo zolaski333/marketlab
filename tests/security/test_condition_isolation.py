@@ -31,6 +31,7 @@ from marketlab.agents.decision import ConditionContext, DecisionAgent, DecisionO
 from marketlab.core.canonical import canonical_json
 from marketlab.core.clock import FrozenClock
 from marketlab.core.instants import Instant, instant_from_datetime
+from marketlab.evaluation.panels import PanelStore
 from marketlab.experiments.arms import ARMS, ArmSpec
 from marketlab.experiments.runner import ArmExecution, CycleRunner, RunConfig
 from marketlab.ingestion.pipeline import IngestionPipeline
@@ -218,6 +219,9 @@ def _capture_requests_across_a_full_cycle(
         model_factory=lambda: _RequestCapturingModel(captured),
         materials=_LabellingMaterials(),
         config=RunConfig(run_id="ISOLATION_RUN"),
+        # With the panel configured, so the second model-call path this
+        # platform has is inspected too rather than only the first.
+        panels=PanelStore(session, clock, blob_store),
     ).run_cycle(cycle_index=0, snapshot_id=manifest.snapshot_id, as_of=SESSION_1)
     return captured
 
@@ -242,6 +246,7 @@ def test_no_arm_identity_reaches_the_model_anywhere_in_a_real_cycle(
                 "injected_context": request.injected_context,
                 "tool_catalogue": [dataclasses.asdict(s) for s in request.tool_catalogue],
                 "tool_results": [dataclasses.asdict(r) for r in request.tool_results],
+                "required_forecasts": [list(key) for key in request.required_forecasts],
             }
         )
         tokens = set(re.findall(r"[A-Za-z_']+", text))
@@ -271,6 +276,7 @@ def test_conditions_differ_in_granted_text_and_in_nothing_else(
                 "system_prompt": request.system_prompt,
                 "tool_catalogue": [dataclasses.asdict(s) for s in request.tool_catalogue],
                 "tool_results": [dataclasses.asdict(r) for r in request.tool_results],
+                "required_forecasts": [list(key) for key in request.required_forecasts],
             }
         )
         for request in captured

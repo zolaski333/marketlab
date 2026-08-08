@@ -22,6 +22,7 @@ from marketlab.core.failures import (
     ObservedAgentFailure,
 )
 from marketlab.core.instants import Instant, instant_from_datetime
+from marketlab.evaluation.panels import PanelStore
 from marketlab.experiments.arms import ArmId, ArmSpec
 from marketlab.experiments.context import ConditionMaterialsProvider, NullMaterialsProvider
 from marketlab.experiments.ordering import OrderPolicy
@@ -216,6 +217,7 @@ def _runner(
     model_factory: Callable[[], LanguageModel] = DeterministicPolicyModel,
     materials: ConditionMaterialsProvider | None = None,
     config: RunConfig | None = None,
+    with_panel: bool = False,
 ) -> CycleRunner:
     return CycleRunner(
         session=rig.session,
@@ -226,6 +228,7 @@ def _runner(
         model_factory=model_factory,
         materials=materials or NullMaterialsProvider(),
         config=config or RunConfig(run_id=RUN_ID),
+        panels=PanelStore(rig.session, rig.clock, rig.blobs) if with_panel else None,
     )
 
 
@@ -663,3 +666,66 @@ def test_a_decision_round_trips_through_the_stored_payload(rig: Rig) -> None:
     )
     original = result.executions[0]
     assert _runner(rig).load_execution(original.bundle_id) == original
+
+
+# ---------------------------------------------------------------------------
+# The imposed panel, when one is configured
+# ---------------------------------------------------------------------------
+
+
+def test_no_panel_is_recorded_when_none_was_asked_for(rig: Rig) -> None:
+    """Silence rather than an empty panel: a stored panel with no answers
+    would be indistinguishable from a condition that refused every question."""
+    result = _run(_runner(rig), rig)
+    assert all(execution.panel is None for execution in result.executions)
+
+
+def test_every_condition_answers_the_same_panel(rig: Rig) -> None:
+    result = _run(_runner(rig, with_panel=True), rig)
+    panels = [execution.panel for execution in result.executions]
+    assert all(panel is not None for panel in panels)
+    assert len({panel.item_count for panel in panels if panel}) == 1
+    assert len({panel.panel_bundle_id for panel in panels if panel}) == len(result.executions)
+
+
+def test_the_panel_gets_its_own_model_instance(rig: Rig) -> None:
+    """A second fresh instance per condition, not the one that just decided:
+    a stateful adapter would otherwise carry the free decision into the
+    assessment that is meant to be isolated from it."""
+    factory = _CountingFactory()
+    result = _run(_runner(rig, model_factory=factory, with_panel=True), rig)
+    # One for the free decision, one for the panel — for every condition.
+    assert factory.instances == 2 * len(result.executions)
+
+
+def test_a_resumed_cycle_fills_a_panel_that_was_never_sealed(rig: Rig) -> None:
+    """An interruption between the decision and the panel leaves a decision
+    with no panel. Resuming must close that hole rather than leave the
+    analysis a condition with nothing to pair on."""
+    interrupted = _run(_runner(rig, config=RunConfig(run_id=RUN_ID, arms=(ArmId.A,))), rig)
+    assert interrupted.executions[0].panel is None
+
+    resumed = _run(
+        _runner(rig, config=RunConfig(run_id=RUN_ID, arms=(ArmId.A,)), with_panel=True), rig
+    )
+    assert resumed.executions[0].bundle_id == interrupted.executions[0].bundle_id
+    assert resumed.executions[0].panel is not None
+
+
+def test_resuming_a_complete_cycle_re_elicits_nothing(rig: Rig) -> None:
+    factory = _CountingFactory()
+    runner = _runner(rig, model_factory=factory, with_panel=True)
+    _run(runner, rig)
+    after_first = factory.instances
+    _run(runner, rig)
+    assert factory.instances == after_first
+
+
+def test_the_panel_is_announced_in_the_event_log(rig: Rig) -> None:
+    result = _run(_runner(rig, with_panel=True), rig)
+    sealed = _event_types(rig, "PANEL_SEALED")
+    assert len(sealed) == len(result.executions)
+    assert {payload["decision_bundle_id"] for payload in sealed} == {
+        execution.bundle_id for execution in result.executions
+    }
+    assert rig.events.verify_chain() > 0

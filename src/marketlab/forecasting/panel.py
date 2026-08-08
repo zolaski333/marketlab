@@ -91,7 +91,7 @@ def build_panel(
             items.append(
                 PanelItem(
                     item_id=derive_id(
-                        IdKind.PANEL_BUNDLE,
+                        IdKind.PANEL_ITEM,
                         snapshot_id=index.snapshot_id,
                         instrument_id=view.instrument_id,
                         horizon_sessions=horizon,

@@ -36,6 +36,17 @@ again — a resumed cycle must not spend a second model call, and more
 importantly must not produce a *second, different* decision for a condition
 that already has one.
 
+The panel, when one is configured
+---------------------------------
+A condition's free decision is followed by the imposed forecast panel (§15),
+run through :class:`~marketlab.agents.panel.PanelAgent` with a **second fresh
+model instance and a second fresh budget**. Isolated from the decision, not
+from the condition: the panel receives the same granted material, because it
+is where the treatment is measured on questions every arm was asked. The panel
+is optional here only so that the many tests that care solely about decisions
+need not pay for it; a real run configures one, because
+:mod:`marketlab.analysis.pairing` has nothing to pair without it.
+
 What is deliberately not here
 -----------------------------
 Turning a :class:`~marketlab.agents.decision.TradeIntent` into an order,
@@ -47,7 +58,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 
 from sqlalchemy import Integer, UniqueConstraint
@@ -61,6 +72,7 @@ from marketlab.agents.decision import (
     Forecast,
     TradeIntent,
 )
+from marketlab.agents.panel import PanelAgent
 from marketlab.core.canonical import canonical_bytes, canonical_hash
 from marketlab.core.clock import Clock
 from marketlab.core.failures import (
@@ -71,9 +83,11 @@ from marketlab.core.failures import (
 )
 from marketlab.core.ids import IdKind, derive_id
 from marketlab.core.instants import Instant
+from marketlab.evaluation.panels import PanelRecord, PanelStore, panel_bundle_id_for
 from marketlab.experiments.arms import ARMS, DEFAULT_ARMS, ArmId, spec_for
 from marketlab.experiments.context import ConditionMaterialsProvider
 from marketlab.experiments.ordering import OrderPolicy, execution_order
+from marketlab.forecasting.panel import DEFAULT_HORIZONS, build_panel
 from marketlab.models.types import LanguageModel, TradeSide
 from marketlab.retrieval.budget import (
     DEFAULT_MAX_EVIDENCE_CHARS,
@@ -95,6 +109,7 @@ __all__ = [
     "ExecutionUnit",
     "MissingCondition",
     "RunConfig",
+    "outcome_from_payload",
 ]
 
 _DEFAULT_SEED: Final = "marketlab"
@@ -177,6 +192,10 @@ class RunConfig:
     max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS
     max_evidence_chars: int = DEFAULT_MAX_EVIDENCE_CHARS
     max_model_turns: int = DEFAULT_MAX_MODEL_TURNS
+    panel_horizons: tuple[int, ...] = DEFAULT_HORIZONS
+    """Horizons the imposed panel asks about, in sessions. Pre-registered
+    before the run: choosing them afterwards would be choosing which horizon
+    the study reports on after seeing which one worked."""
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
@@ -224,6 +243,10 @@ class ArmExecution:
     content_hash: str
     context_blob_hash: str | None
     outcome: DecisionOutcome
+    panel: PanelRecord | None = None
+    """The sealed panel, when the runner was configured with one. ``None``
+    means no panel was asked for — never "the condition answered nothing",
+    which is an empty :class:`~marketlab.agents.panel.PanelOutcome` instead."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +317,12 @@ class CycleRunner:
     materials: ConditionMaterialsProvider
     config: RunConfig
     agent: DecisionAgent = field(default_factory=DecisionAgent)
+    panels: PanelStore | None = None
+    """Set to elicit and seal the imposed panel after each decision. Left
+    unset, no panel runs at all — which is honest (nothing is recorded) rather
+    than convenient (an empty panel recorded as if it had been asked)."""
+
+    panel_agent: PanelAgent = field(default_factory=PanelAgent)
 
     def run_cycle(self, *, cycle_index: int, snapshot_id: str, as_of: Instant) -> CycleResult:
         """Run every condition against one frozen snapshot.
@@ -385,7 +414,12 @@ class CycleRunner:
             model_id=row.model_id,
             content_hash=row.content_hash,
             context_blob_hash=row.context_blob_hash,
-            outcome=_payload_to_outcome(payload),
+            outcome=outcome_from_payload(payload),
+            panel=(
+                self.panels.load(panel_bundle_id_for(bundle_id))
+                if self.panels is not None
+                else None
+            ),
         )
 
     # -- one condition -------------------------------------------------------
@@ -407,16 +441,33 @@ class CycleRunner:
             repetition=unit.repetition,
         )
         already_sealed = self.load_execution(bundle_id)
-        if already_sealed is not None:
-            # §30.6: resuming must not re-decide. Returning the stored result
-            # keeps a resumed cycle identical to the interrupted one rather
-            # than replacing one condition's decision with a fresh draw.
-            return already_sealed
-
         arm = spec_for(unit.arm_id)
         material = self.materials.materials_for(
             arm, cycle_id=cycle_id, as_of=as_of, repetition=unit.repetition
         )
+        if already_sealed is not None:
+            # §30.6: resuming must not re-decide. Returning the stored result
+            # keeps a resumed cycle identical to the interrupted one rather
+            # than replacing one condition's decision with a fresh draw. The
+            # panel is a separate elicitation, so an interruption between the
+            # two leaves a decision with no panel; that hole is filled on
+            # resume rather than left for the analysis to trip over.
+            if self.panels is None or already_sealed.panel is not None:
+                return already_sealed
+            return replace(
+                already_sealed,
+                panel=self._elicit_panel(
+                    unit,
+                    bundle_id=bundle_id,
+                    condition=ConditionContext(
+                        injected_context=material, max_model_turns=self.config.max_model_turns
+                    ),
+                    index=index,
+                    cycle_id=cycle_id,
+                    as_of=as_of,
+                ),
+            )
+
         context_blob_hash = (
             self.blobs.put(material.encode("utf-8")).digest if material is not None else None
         )
@@ -439,7 +490,7 @@ class CycleRunner:
         except ModelProviderError as exc:
             return self._record_missing(unit, cycle_id=cycle_id, as_of=as_of, reason=str(exc))
 
-        return self._seal(
+        execution = self._seal(
             unit,
             bundle_id=bundle_id,
             position=position,
@@ -450,6 +501,84 @@ class CycleRunner:
             context_blob_hash=context_blob_hash,
             outcome=outcome,
         )
+        if self.panels is None:
+            return execution
+        return replace(
+            execution,
+            panel=self._elicit_panel(
+                unit,
+                bundle_id=bundle_id,
+                condition=condition,
+                index=index,
+                cycle_id=cycle_id,
+                as_of=as_of,
+            ),
+        )
+
+    def _elicit_panel(
+        self,
+        unit: ExecutionUnit,
+        *,
+        bundle_id: str,
+        condition: ConditionContext,
+        index: RetrievalIndex,
+        cycle_id: str,
+        as_of: Instant,
+    ) -> PanelRecord:
+        """Ask this condition the imposed panel, isolated from its decision.
+
+        A *second* fresh model and a *second* fresh budget: an assessment must
+        not be cheaper for the arm that spent less deciding, and a stateful
+        adapter must not carry the free decision into the answers.
+        """
+        assert self.panels is not None  # guarded by the only caller
+        panel = build_panel(index, horizons=self.config.panel_horizons)
+        model = self.model_factory()
+        outcome = self.panel_agent.elicit(
+            RetrievalToolkit(
+                index,
+                ToolBudget(
+                    max_calls=self.config.max_tool_calls,
+                    max_evidence_chars=self.config.max_evidence_chars,
+                ),
+            ),
+            model,
+            condition,
+            panel,
+            as_of=as_of,
+        )
+        record = self.panels.record(
+            outcome,
+            decision_bundle_id=bundle_id,
+            run_id=self.config.run_id,
+            cycle_id=cycle_id,
+            arm_id=str(unit.arm_id),
+            repetition=unit.repetition,
+            as_of=as_of,
+            model_id=model.model_id,
+            item_count=len(panel),
+        )
+        self.events.append(
+            "PANEL_SEALED",
+            {
+                "panel_bundle_id": record.panel_bundle_id,
+                "decision_bundle_id": bundle_id,
+                "snapshot_id": index.snapshot_id,
+                "model_id": model.model_id,
+                "content_hash": record.content_hash,
+                "item_count": record.item_count,
+                "answered_count": len(outcome.answers),
+                "unanswered_count": outcome.unanswered_count,
+                "tool_calls_made": outcome.tool_calls_made,
+                "model_turns": outcome.model_turns,
+            },
+            occurred_at=as_of,
+            run_id=self.config.run_id,
+            cycle_id=cycle_id,
+            arm_id=str(unit.arm_id),
+            repetition=unit.repetition,
+        )
+        return record
 
     def _seal(
         self,
@@ -622,7 +751,13 @@ def _outcome_to_payload(outcome: DecisionOutcome) -> dict[str, Any]:
     }
 
 
-def _payload_to_outcome(payload: Mapping[str, Any]) -> DecisionOutcome:
+def outcome_from_payload(payload: Mapping[str, Any]) -> DecisionOutcome:
+    """Rehydrate a sealed decision from its stored blob.
+
+    Public because resolution (§20) reads decision bundles it did not write,
+    and re-implementing this parse there would give the study two readers of
+    one format that could drift apart.
+    """
     return DecisionOutcome(
         snapshot_id=str(payload["snapshot_id"]),
         forecasts=tuple(

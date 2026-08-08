@@ -74,6 +74,8 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "snapshots",
         "snapshot_members",
         "decision_bundles",
+        "panel_bundles",
+        "forecast_resolutions",
         "ledger_transactions",
         "ledger_entries",
         "position_events",
