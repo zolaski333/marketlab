@@ -8,9 +8,12 @@ message: >-
   which pre-registration applied — see docs/PRE_REGISTRATION.md.
 type: software
 authors:
-  - name: MarketLab contributors
+  - family-names: Gallusser
+    given-names: Noah
     alias: zolaski333
 license: MIT
+version: 0.1.0
+date-released: "2026-08-08"
 repository-code: "https://github.com/zolaski333/marketlab"
 abstract: >-
   MarketLab studies whether persistent memory and periodic strategic reflection

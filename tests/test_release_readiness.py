@@ -79,6 +79,32 @@ def test_the_citation_metadata_is_valid_yaml_and_names_the_licence() -> None:
     assert citation["title"].strip()
 
 
+def test_the_same_person_is_named_as_author_in_all_three_places() -> None:
+    """The copyright line, the package metadata and the citation file each
+    state who this belongs to, in three different formats, and nobody reads
+    them together. They drift, and the drift is invisible until someone tries
+    to cite the work or reuse it.
+    """
+    citation = yaml.safe_load(_read("CITATION.cff"))
+    author = citation["authors"][0]
+    full_name = f"{author['given-names']} {author['family-names']}"
+
+    assert full_name in _read("LICENSE"), "The LICENSE copyright names someone else."
+
+    declared = tomllib.loads(_read("pyproject.toml"))["project"]["authors"]
+    assert [entry["name"] for entry in declared] == [full_name]
+
+
+def test_the_project_urls_point_at_the_repository_and_its_two_key_documents() -> None:
+    """A public package whose metadata leads nowhere. The roadmap and the
+    pre-registration are the two documents a reader needs to interpret any
+    claim made here, so they are addressable rather than merely present."""
+    urls = tomllib.loads(_read("pyproject.toml"))["project"]["urls"]
+    assert urls["Repository"].startswith("https://github.com/")
+    for key in ("Roadmap", "Pre-registration"):
+        assert urls[key].startswith(urls["Repository"]), key
+
+
 # ---------------------------------------------------------------------------
 # Scientifically honest
 # ---------------------------------------------------------------------------

@@ -9,6 +9,25 @@ description = "Prospective, reproducible research platform for studying decision
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+authors = [{ name = "Noah Gallusser" }]
+keywords = [
+    "large-language-models",
+    "agents",
+    "forecasting",
+    "calibration",
+    "reproducibility",
+    "pre-registration",
+    "virtual-market",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
 
 dependencies = [
     "pydantic>=2.7",
@@ -50,6 +69,13 @@ dev = [
 
 [project.scripts]
 marketlab = "marketlab.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/zolaski333/marketlab"
+Repository = "https://github.com/zolaski333/marketlab"
+Issues = "https://github.com/zolaski333/marketlab/issues"
+Roadmap = "https://github.com/zolaski333/marketlab/blob/main/docs/ROADMAP.md"
+"Pre-registration" = "https://github.com/zolaski333/marketlab/blob/main/docs/PRE_REGISTRATION.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/marketlab"]
