@@ -1,0 +1,78 @@
+# The five quality gates, run on every push and pull request.
+#
+# The origin story in docs/ROADMAP.md is why this file exists as it does: the
+# previous implementation's validation report claimed to satisfy ruff and mypy
+# gates that were never installed. A claim in a document is worth nothing; a
+# claim a machine re-checks on every commit is worth something.
+#
+# Each gate is its own step rather than one chained command, so a failure names
+# which gate failed instead of returning a single non-zero exit.
+#
+# Two operating systems, deliberately. This platform derives UTC session
+# boundaries from local wall-clock times through zoneinfo, and Linux reads the
+# system tz database while Windows has none and relies on the tzdata package.
+# A DST bug that only appears on one of them is exactly the kind this study
+# cannot afford, since every cutoff in it is a session close.
+
+name: quality gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python and locked dependencies
+        run: uv sync --all-extras --frozen
+
+      # Proof the gates exist before anything claims to have passed them.
+      - name: Report tool versions
+        run: |
+          uv run ruff --version
+          uv run mypy --version
+          uv run pytest --version
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: mypy --strict
+        run: uv run mypy src
+
+      - name: pytest
+        run: uv run pytest -q
+
+      # The command line is a deliverable, so it is exercised as one: a study
+      # is run, resolved, analysed, verified and replayed end to end. The
+      # replay exits non-zero on any divergence, which makes this step a real
+      # reproducibility check rather than a smoke test.
+      - name: end-to-end study through the CLI
+        run: |
+          uv run marketlab run --config configs/synthetic-pilot.yaml --db ci/study.db --sessions 8
+          uv run marketlab resolve --run-id SYNTHETIC_PILOT --db ci/study.db
+          uv run marketlab analyse --run-id SYNTHETIC_PILOT --db ci/study.db --rope-lower -0.01 --rope-upper 0.01 --resamples 500
+          uv run marketlab verify --db ci/study.db
+          uv run marketlab replay --run-id SYNTHETIC_PILOT --db ci/study.db

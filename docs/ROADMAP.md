@@ -36,7 +36,12 @@ All five must pass before anything is marked `done`:
 uv sync --all-extras && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest
 ```
 
-Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
+Last verified: 816 tests passing, `mypy --strict` clean on 84 source files.
+Run automatically on every push and pull request, on Linux and Windows, by
+`.github/workflows/ci.yml` — and `tests/test_quality_gates.py` checks that the
+tools are declared, are executable in the running interpreter, and are actually
+invoked by that workflow. The predecessor's report claimed gates that were
+never installed; that specific claim is now one a machine can contradict.
 
 ---
 
@@ -59,7 +64,7 @@ Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
 | Point-in-time cutoff, structurally required (§6.3) | `done` | `tests/unit/test_cutoff.py` |
 | Import lint forbidding raw session access in agent paths | `done` | `tests/security/test_decision_path_isolation.py` |
 | **Power simulation and API cost model** | `not started` | — |
-| Architecture docs and ADRs | `partial` | this file; module docstrings carry the reasoning |
+| Architecture docs and ADRs | `partial` | this file; module docstrings carry the reasoning. `docs/adr/` is still empty — task #5 |
 
 ### Known gaps in what is marked `done`
 
@@ -122,7 +127,13 @@ Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
 | Paired analysis: (date, instrument) pairing, cross-sectional aggregation, real block bootstrap, TOST/ROPE, multiplicity (§21.2–§21.7) | `done` | `tests/unit/test_analysis.py`, `tests/unit/test_bootstrap.py` |
 | Resolution and the analysis plan wired end to end over the synthetic world | `done` | `tests/integration/test_evaluation_wiring.py` |
 | Real replay that recomputes and compares (§12.5, §30.4) | `done` | `tests/replay/test_replay_verifier.py` |
-| CLI (§29) | `not started` | — |
+| Persisted, unchangeable run configuration (§29.2) | `done` | `tests/cli/test_cli.py` |
+| CLI — help, exit codes, structured logs, `--dry-run`, idempotent resume (§29) | `done` | `tests/cli/test_cli.py` |
+| Property-based temporality and accounting (§30.2, §30.5) | `done` | `tests/property/test_temporality.py`, `tests/property/test_accounting.py` |
+| Injection fixtures routed as far as the prompt (§30.7) | `done` | `tests/security/test_injection_routing.py` |
+| Every failure kind, rejection reason and scope exercised (§23, §30.8) | `done` | `tests/unit/test_failure_taxonomy.py`, `tests/unit/test_execution_failures.py` |
+| Exact, hand-computed analysis values (§30.9) | `done` | `tests/unit/test_analysis_values.py` |
+| Quality gates installed and run in CI (§30.10) | `done` | `tests/test_quality_gates.py`, `.github/workflows/ci.yml` |
 
 ### Known gaps in what is marked `done`
 
@@ -207,8 +218,10 @@ Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
   `tests/unit/test_cycle_driver.py` asserts it directly rather than inferring
   it from a downstream number. The integration test and the replay both go
   through it, so the sequence is no longer a convention two places agree on.
-  What is still *not* enforced is that a caller uses the driver at all; the
-  CLI (task 13) is where it becomes the only entry point.
+  `marketlab.study.pipeline.open_study` is now the only assembly the CLI, the
+  integration tests and the replay use. What is still *not* enforced is that a
+  caller uses it at all: nothing stops new code from wiring the components up
+  by hand, and only review would catch it.
 - **Resolution runs as a pass over a run, not as a step inside the cycle.**
   Correct for a completed study and safe to re-run (it is idempotent and only
   ever writes terminal verdicts), but a prospective study resolving as it goes
@@ -282,12 +295,15 @@ Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
   it goes. §23.4's paired policy (what the analysis does with an incomplete
   cycle: drop the pair, drop the cycle, impute) is a statistical decision
   belonging to task 12, and nothing currently enforces one.
-- **A run's configuration is not persisted.** `RunConfig` carries the
-  pre-registered parameters (arms, repetitions, seed, order policy, budgets)
-  and every cycle event references `run_id`, but the config itself lives only
-  in the caller. Reconstructing what a historical run was configured to do
-  currently means reading the code that launched it. A `runs` table belongs
-  with the CLI (task 13), which is what will actually construct these.
+- **A run's configuration is persisted and is unchangeable.**
+  `marketlab.study.config.StudyConfig` holds every pre-registered parameter,
+  is written to the `runs` table under its `run_id` on first use, and is
+  checked by fingerprint on every later one — re-running with a different
+  target weight is refused rather than honoured. What is still *not* captured
+  is the trading calendars, which are objects with behaviour rather than
+  values; they are named by `world` and rebuilt by the world builder. Honest
+  for a fixed synthetic script, and a real Phase 3 universe would need a
+  persisted calendar registry of its own.
 - **`decision_content_hash` deliberately excludes failures and process
   metrics.** Two identical decisions reached in a different number of turns
   hash the same. That is the right default for "did these two conditions
@@ -366,11 +382,13 @@ Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
   ledger) but none has a comparison plan yet. Which of them is the *primary*
   metric is open question 1, still waiting on the power simulation.
 
-- **A replay must be handed the calendars, the execution policy and the run
-  configuration.** None of the three is persisted, so a replay given different
-  ones reports divergences — correct, since it would genuinely be a different
-  study, but it means "replay this run" is not yet a single self-contained
-  operation. A `runs` table (see the `RunConfig` gap above) would close it.
+- **`marketlab replay --run-id X` is now self-contained; the library call is
+  not.** The command reads the persisted configuration and rebuilds this
+  world's calendars, so a replay needs nothing but the database.
+  `ReplayVerifier` itself still takes a `ReplayConfig`, and one constructed by
+  hand with a different policy will report divergences — correct, since that
+  would genuinely be a different study, but it is a foot-gun the CLI avoids
+  and a direct caller does not.
 - **A replay cannot re-elicit a model, by construction.** Sealed decisions and
   panels are inputs to it, exactly as the raw market data is; their
   fingerprints are re-derived from the payloads behind them, and everything
@@ -383,6 +401,38 @@ Last verified: 689 tests passing, `mypy --strict` clean on 79 source files.
   nothing else does. What must match to the cent is what the books say; a
   replay that produced the same balances by a different sequence of postings
   would not be flagged.
+
+- **The CLI runs one world.** `StudyConfig.world` accepts only `SYNTHETIC`,
+  and a Phase 3 configuration would need a second world builder plus the
+  persisted calendar registry noted above. Rejected loudly rather than
+  silently defaulted, so a configuration naming a world that does not exist
+  fails at declaration.
+- **The failure-taxonomy guard checks that a member is *named* by a test, not
+  that it is asserted on.** A weak check, deliberately kept because it is
+  cheap and it fired: adding it surfaced four members nothing tested. It would
+  not catch a test that mentions a kind in a comment and asserts nothing, and
+  no automated check would; that is what review is for.
+- **`tests/test_quality_gates.py` checks the gates are declared, installed and
+  invoked — not that CI is green.** A workflow file can exist and every run of
+  it can fail. The badge for that is GitHub's, not this repository's, and this
+  file does not claim it.
+- **CI has never run.** The workflow is committed and its command sequence was
+  executed locally end to end on Windows, but no push has exercised it on
+  GitHub, and the Linux leg of the matrix is untested in practice. The first
+  push is where that claim becomes real.
+- **There is no coverage threshold.** `pytest-cov` is installed and unused. A
+  percentage target tends to be met by testing what is easy rather than what
+  is load-bearing, and this suite's guards — condition isolation, the
+  append-only triggers, the replay, the taxonomy scan — are chosen for what
+  they would catch rather than for what they touch. Worth revisiting if the
+  suite ever stops being read.
+- **Structured logs are per-command records, not a log stream.** `--json`
+  emits one canonical JSON object per result on stdout; there is no
+  correlation id, no severity, and no timestamp on each line. Enough for
+  `| jq` and for a scheduler's exit code, not enough for a log aggregator.
+  §29.4 is satisfied in the sense that matters here (machine-readable output,
+  results separated from progress) and not in the sense a production service
+  would need.
 
 ---
 
@@ -411,6 +461,9 @@ Each is deliberate; none is silent.
 | §21.4 | Bootstrap by blocks | Moving block bootstrap over an explicit SHA-256 key stream, sharing `core/rng.py` with the arm ordering | Same reasoning as §13.4: `random.shuffle`/`choices` are implementation details that have changed between CPython versions, and a published interval must be recomputable years later on a different interpreter. |
 | §21.7 | TOST against a ROPE | TOST read off the **bootstrap distribution**, with the three-valued ROPE decision rule | A parametric TOST assumes normality on a few dozen dates. Reading both one-sided tests off the same block bootstrap that produced the interval keeps one set of distributional assumptions instead of two. "Inconclusive" is kept as a distinct verdict rather than collapsed into "no difference", which is how underpowered studies come to claim null results. |
 | §21 | An analysis plan | A plan object that **cannot be constructed without a ROPE** | §21.7 requires "no practically useful effect" to be reachable, which requires a pre-registered region of practical equivalence. Giving `Rope` a default would let the library make a scientific claim on the study owner's behalf; making it a required field makes the omission impossible to overlook. |
+| §29.2 | A run is launched with parameters | A run is **declared**, and re-declaring it with different parameters is refused | The specification does not say the configuration is immutable; this implementation makes it so. A study whose parameters can be edited between cycles is not pre-registered, it is one that was tuned while its results were visible. `marketlab.study.config.StudyRegistry` compares fingerprints and raises, the same conflict detection `SnapshotBuilder.build` applies to snapshots. |
+| §29 | A CLI | Commands that all go through one assembly (`open_study`) and one cycle order (`CycleDriver`) | A command line that built its own component graph would be the fourth assembly in this repository, and the fourth is where two of them start to differ in a way nobody notices. |
+| §30.10 | Quality gates that pass | Gates whose *installation* is itself tested | The predecessor's report claimed ruff and mypy gates that were never installed, and nothing in the repository could contradict it. `tests/test_quality_gates.py` runs the tools and reads the CI workflow, so the claim is falsifiable by a machine rather than by a reader's trust. |
 | §12.5 | Exact replay | Replay of everything **downstream of the model**, into a separate database, compared field by field | A real provider is not a pure function, so re-running the decision loop would produce a different decision and report a divergence that is not a defect. Sealed decisions are inputs; their fingerprints are still re-derived from the payloads behind them. Every mistake the platform itself can make lies downstream of the model, and all of it is recomputed. See the `marketlab.replay.verifier` docstring. |
 
 ## Open questions for the study owner

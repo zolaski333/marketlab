@@ -172,9 +172,10 @@ def run(
         with database.session_scope() as session:
             blobs = BlobStore(_blob_root(db))
             study = open_study(study_config, session=session, clock=SystemClock(), blobs=blobs)
+            planned = min(sessions, study_config.sessions) if sessions else study_config.sessions
             emitter.progress(
                 f"running {study_config.run_id}: {len(study_config.arms)} arms x "
-                f"{study_config.sessions} sessions"
+                f"{planned} of {study_config.sessions} sessions"
             )
             summary = study.run(sessions=sessions)
             emitter.table("run", summary.as_payload())
